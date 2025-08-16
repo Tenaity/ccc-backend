@@ -9,7 +9,7 @@ from sqlalchemy import select, text
 
 from models import init_db, SessionLocal, Staff, FixedAssignment, OffDay, Assignment, Holiday
 from rules import SHIFT_DEFS
-from scheduler import schedule_month as generate_schedule  # generate_schedule(year, month, shuffle, seed, save)
+from scheduler import schedule_month as generate_schedule  # schedule_month(year, month, shuffle, seed, save[, fill_hc])
 from scheduler.estimator import estimate_month
 
 # Trỏ tới thư mục build của frontend (Vite) nếu đã build
@@ -140,6 +140,7 @@ def gen():
     """Generate lịch cho (year, month).
     - save=false (default): preview, không lưu DB, trả planned[]
     - save=true: ghi DB từ đầu theo cùng tham số (shuffle/seed)
+    - fill_hc (optional): tự động bù ca HC cho người thiếu công (v2)
     """
     payload = request.get_json(silent=True) or {}
     today = date.today()
@@ -155,8 +156,14 @@ def gen():
     except Exception:
         seed = None
     save_flag = bool(payload.get("save", False))
+    fill_hc = bool(payload.get("fill_hc", False))  # 👈 NEW: nhận cờ từ frontend
 
-    result = generate_schedule(year, month, shuffle=shuffle, seed=seed, save=save_flag)
+    # Gọi scheduler; nếu code cũ chưa có tham số fill_hc thì fallback gọi không có tham số
+    try:
+        result = generate_schedule(year, month, shuffle=shuffle, seed=seed, save=save_flag, fill_hc=fill_hc)
+    except TypeError:
+        # Phiên bản cũ không nhận fill_hc → vẫn hoạt động bình thường (không auto-fill)
+        result = generate_schedule(year, month, shuffle=shuffle, seed=seed, save=save_flag)
 
     # ✅ handle cả dict và (dict, status)
     if isinstance(result, tuple) and len(result) == 2 and isinstance(result[0], dict):
@@ -194,7 +201,7 @@ def admin_reset():
         except Exception as e:
             s.rollback()
             return {"error": str(e)}, 500
-        
+
 @app.get("/api/schedule/estimate")
 def api_estimate():
     today = date.today()
