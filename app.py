@@ -10,6 +10,7 @@ from sqlalchemy import select, text
 from models import init_db, SessionLocal, Staff, FixedAssignment, OffDay, Assignment, Holiday
 from rules import SHIFT_DEFS
 from scheduler import schedule_month as generate_schedule  # generate_schedule(year, month, shuffle, seed, save)
+from scheduler.estimator import estimate_month
 
 # Trỏ tới thư mục build của frontend (Vite) nếu đã build
 FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
@@ -138,14 +139,14 @@ def list_assignments():
 def gen():
     """Generate lịch cho (year, month).
     - save=false (default): preview, không lưu DB, trả planned[]
-    - save=true: ghi DB theo cùng tham số (shuffle/seed)
+    - save=true: ghi DB từ đầu theo cùng tham số (shuffle/seed)
     """
     payload = request.get_json(silent=True) or {}
     today = date.today()
     year = int(payload.get("year", today.year))
     month = int(payload.get("month", today.month))
     if month < 1 or month > 12:
-        return {"error": "month must be 1..12"}, 400
+        return jsonify({"error": "month must be 1..12"}), 400
 
     shuffle = bool(payload.get("shuffle", False))
     seed = payload.get("seed")
@@ -157,11 +158,12 @@ def gen():
 
     result = generate_schedule(year, month, shuffle=shuffle, seed=seed, save=save_flag)
 
-    # chuẩn hoá trả về: (body, status) hoặc body
-    if isinstance(result, tuple) and len(result) == 2:
+    # ✅ handle cả dict và (dict, status)
+    if isinstance(result, tuple) and len(result) == 2 and isinstance(result[0], dict):
         body, status = result
-        return jsonify(body), status
-    return jsonify(result)
+        return jsonify(body), int(status)
+    else:
+        return jsonify(result)
 
 # ====== Reset DB ======
 @app.post("/api/admin/reset")
@@ -192,6 +194,13 @@ def admin_reset():
         except Exception as e:
             s.rollback()
             return {"error": str(e)}, 500
+        
+@app.get("/api/schedule/estimate")
+def api_estimate():
+    today = date.today()
+    y = request.args.get("year", type=int) or today.year
+    m = request.args.get("month", type=int) or today.month
+    return jsonify(estimate_month(y, m))
 
 if __name__ == "__main__":
     # 5001 đúng theo log bạn đang dùng
