@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 import random
-from collections import deque, defaultdict  # 👈 thêm defaultdict
+from collections import deque, defaultdict
 from datetime import timedelta
 from models import SessionLocal
 from rules import get_profile
@@ -10,22 +10,13 @@ from .repo import load_staff, load_locked, load_fixed, load_holidays
 from .placements import Planned, place, after_place, reset_trackers, exp_planned
 from .randomize import choose, choose_relaxed, CFG as RAND_CFG
 from .validators import validate_one_day_leader
+from .balancer import balance_hc  # 👈 NEW
 
-def schedule_month(
-    year: int,
-    month: int,
-    *,
-    shuffle: bool = False,
-    seed: int | None = None,
-    save: bool = False,
-    fill_hc: bool = False,   # 👈 NEW: bật/tắt tự bù HC
-):
-    """
-    Nếu save=False => preview (không ghi DB), trả planned[].
-    Nếu save=True  => ghi DB theo tham số, vẫn trả planned[].
-    fill_hc=True  => sau khi xếp ca chính, tự bù ca HC các ngày T2–T6 (trừ ngày Lễ)
-                     cho những nhân sự còn thiếu so với base_quota.
-    """
+# DUNG SAI công cho mỗi người: cho phép thiếu/dư tối đa 0.9 công
+TOLERANCE = 0.9
+
+def schedule_month(year: int, month: int, *, shuffle: bool = False, seed: int | None = None, save: bool = False, fill_hc: bool = False):
+
     first = ymd(year, month, 1)
     last  = ymd(year, month, month_last_day(year, month))
 
@@ -37,6 +28,23 @@ def schedule_month(
         if not TC:
             return {"ok": False, "error": "Không có Trưởng ca (TC)."}, 400
 
+        # === NEW: bản đồ quota & credit hiện tại (tính trong vòng generate) ===
+        profile  = get_profile()
+        CREDITS = profile.credit()  # {"CA1":1, "CA2":1, "HC":1, "K":1.25, "Đ":1.5, "P":0}
+        base_quota = {st.id: float(getattr(st, "base_quota", 0.0)) for st in (TC + GDV + HC)}
+        credit_map = defaultdict(float)   # staff_id -> credits đã xếp trong planned
+
+        def can_take(staff_id: int, code: str) -> bool:
+            """Không để vượt trần base_quota + TOLERANCE."""
+            return (credit_map[staff_id] + CREDITS.get(code, 0.0)) <= (base_quota.get(staff_id, 0.0) + TOLERANCE + 1e-9)
+
+        def do_place(day, staff_id: int, code: str, position: str | None):
+            """place + cập nhật credit_map + trackers."""
+            place(s, planned, day=day, staff_id=staff_id, code=code, position=position, save=save)
+            credit_map[staff_id] += CREDITS.get(code, 0.0)
+            after_place(staff_id, day, code)
+
+        # === hàng đợi chọn ngẫu nhiên ===
         q_tc_day   = deque(TC)
         q_tc_night = deque(TC)
         q_gdv      = deque(GDV)
@@ -45,16 +53,18 @@ def schedule_month(
         locked   = load_locked(s)
         fixed    = load_fixed(s)
         holidays = load_holidays(s)
-        profile  = get_profile()  # mặc định CSKH_2025 (có thể đổi qua ENV)
 
         # ===== HC ngày thường (T2–T6, trừ Lễ) =====
         d = first
         while d <= last:
             if d.weekday() < 5 and d not in holidays:
                 for h in HC:
-                    if h.id not in locked.get(d, set()):
-                        place(s, planned, day=d, staff_id=h.id, code="HC", position="TD", save=save)
-                        after_place(h.id, d, "HC")
+                    if h.id in locked.get(d, set()):
+                        continue
+                    # NEW: chặn trần khi rải HC mặc định
+                    if not can_take(h.id, "HC"):
+                        continue
+                    do_place(d, h.id, "HC", "TD")
             d += timedelta(days=1)
         if save: s.commit()
 
@@ -70,40 +80,72 @@ def schedule_month(
                 if len(q_tc_night): q_tc_night.rotate(rng.randrange(len(q_tc_night)))
                 if len(q_gdv):      q_gdv.rotate(rng.randrange(len(q_gdv)))
 
-            # leader Đ (Đ@TD) — thiếu ứng viên thì bỏ qua, không break toàn ngày
+            # leader Đ (Đ@TD)
             if detail.leader:
                 pool = [x for x in list(q_tc_night) if x.id not in used and x.id not in locked_today]
-                cand = choose(pool, d=d, code="Đ", locked_today=locked_today, rng=rng) or \
-                       choose_relaxed(pool, d=d, code="Đ", locked_today=locked_today, rng=rng)
-                if cand:
-                    place(s, planned, day=d, staff_id=cand.id, code="Đ", position="TD", save=save)
-                    used.add(cand.id); after_place(cand.id, d, "Đ")
-                    locked[d + timedelta(days=1)].add(cand.id)
+                # thử chọn đến khi gặp người không vượt trần
+                tried = set()
+                while pool:
+                    cand = choose(pool, d=d, code="Đ", locked_today=locked_today, rng=rng) or \
+                           choose_relaxed(pool, d=d, code="Đ", locked_today=locked_today, rng=rng)
+                    if not cand: break
+                    if cand.id in tried:
+                        break
+                    tried.add(cand.id)
+                    if can_take(cand.id, "Đ"):
+                        do_place(d, cand.id, "Đ", "TD")
+                        used.add(cand.id)
+                        locked[d + timedelta(days=1)].add(cand.id)
+                        break
+                    # bỏ ứng viên vượt trần khỏi pool và thử lại
+                    pool = [x for x in pool if x.id != cand.id]
 
             # Đ trắng @ Tổng đài (D_WHITE)
             need = detail.TD_white
             while need > 0:
                 pool = [x for x in list(q_gdv) + list(q_tc_night) if x.id not in used and x.id not in locked_today]
-                cand = choose(pool, d=d, code="Đ", locked_today=locked_today, rng=rng) or \
-                       choose_relaxed(pool, d=d, code="Đ", locked_today=locked_today, rng=rng)
-                if not cand:
+                tried = set()
+                placed = False
+                while pool:
+                    cand = choose(pool, d=d, code="Đ", locked_today=locked_today, rng=rng) or \
+                           choose_relaxed(pool, d=d, code="Đ", locked_today=locked_today, rng=rng)
+                    if not cand: break
+                    if cand.id in tried:
+                        break
+                    tried.add(cand.id)
+                    if can_take(cand.id, "Đ"):
+                        do_place(d, cand.id, "Đ", "D_WHITE")
+                        used.add(cand.id)
+                        locked[d + timedelta(days=1)].add(cand.id)
+                        placed = True
+                        break
+                    pool = [x for x in pool if x.id != cand.id]
+                if not placed:
                     break
-                place(s, planned, day=d, staff_id=cand.id, code="Đ", position="D_WHITE", save=save)
-                used.add(cand.id); after_place(cand.id, d, "Đ")
-                locked[d + timedelta(days=1)].add(cand.id)
                 need -= 1
 
-            # Đ @ PGD (Đ nền đỏ)
+            # Đ @ PGD
             need = detail.PGD
             while need > 0:
                 pool = [x for x in list(q_gdv) + list(q_tc_night) if x.id not in used and x.id not in locked_today]
-                cand = choose(pool, d=d, code="Đ", locked_today=locked_today, rng=rng) or \
-                       choose_relaxed(pool, d=d, code="Đ", locked_today=locked_today, rng=rng)
-                if not cand:
+                tried = set()
+                placed = False
+                while pool:
+                    cand = choose(pool, d=d, code="Đ", locked_today=locked_today, rng=rng) or \
+                           choose_relaxed(pool, d=d, code="Đ", locked_today=locked_today, rng=rng)
+                    if not cand: break
+                    if cand.id in tried:
+                        break
+                    tried.add(cand.id)
+                    if can_take(cand.id, "Đ"):
+                        do_place(d, cand.id, "Đ", "PGD")
+                        used.add(cand.id)
+                        locked[d + timedelta(days=1)].add(cand.id)
+                        placed = True
+                        break
+                    pool = [x for x in pool if x.id != cand.id]
+                if not placed:
                     break
-                place(s, planned, day=d, staff_id=cand.id, code="Đ", position="PGD", save=save)
-                used.add(cand.id); after_place(cand.id, d, "Đ")
-                locked[d + timedelta(days=1)].add(cand.id)
                 need -= 1
 
             if save: s.commit()
@@ -116,84 +158,149 @@ def schedule_month(
             locked_today = locked.get(d, set())
             detail = profile.day_detail(kind=day_kind(d, holidays))
 
-            # jitter hàng đợi
             if RAND_CFG["daily_jitter"]:
                 if len(q_tc_day): q_tc_day.rotate(rng.randrange(len(q_tc_day)))
                 if len(q_gdv):    q_gdv.rotate(rng.randrange(len(q_gdv)))
 
             # fixed trước (đăng ký cố định)
             for r in fixed.get(d, []):
-                if r.staff_id not in used and r.staff_id not in locked_today:
-                    place(s, planned, day=d, staff_id=r.staff_id, code=r.shift_code, position="TD", save=save)
-                    used.add(r.staff_id); after_place(r.staff_id, d, r.shift_code)
+                if r.staff_id in used or r.staff_id in locked_today:
+                    continue
+                if not can_take(r.staff_id, r.shift_code):
+                    continue
+                do_place(d, r.staff_id, r.shift_code, "TD")
+                used.add(r.staff_id)
 
             # leader K @ TD
             if detail.TD.get("K_leader", 0) > 0:
                 pool = [x for x in list(q_tc_day) if x.id not in used and x.id not in locked_today]
-                cand = choose(pool, d=d, code="K", locked_today=locked_today, rng=rng) or \
-                       choose_relaxed(pool, d=d, code="K", locked_today=locked_today, rng=rng)
-                if cand:
-                    place(s, planned, day=d, staff_id=cand.id, code="K", position="TD", save=save)
-                    used.add(cand.id); after_place(cand.id, d, "K")
+                tried = set()
+                while pool:
+                    cand = choose(pool, d=d, code="K", locked_today=locked_today, rng=rng) or \
+                           choose_relaxed(pool, d=d, code="K", locked_today=locked_today, rng=rng)
+                    if not cand: break
+                    if cand.id in tried:
+                        break
+                    tried.add(cand.id)
+                    if can_take(cand.id, "K"):
+                        do_place(d, cand.id, "K", "TD")
+                        used.add(cand.id)
+                        break
+                    pool = [x for x in pool if x.id != cand.id]
 
-            # K_WHITE (T7) — trực tại Tổng đài (1 người nếu rule yêu cầu)
+            # K_WHITE (T7)
             kw = getattr(detail, "K_WHITE", 0)
             while kw > 0:
                 pool = [x for x in list(q_gdv) + list(q_tc_day) if x.id not in used and x.id not in locked_today]
-                cand = choose(pool, d=d, code="K", locked_today=locked_today, rng=rng) or \
-                       choose_relaxed(pool, d=d, code="K", locked_today=locked_today, rng=rng)
-                if not cand:
+                tried = set()
+                placed = False
+                while pool:
+                    cand = choose(pool, d=d, code="K", locked_today=locked_today, rng=rng) or \
+                           choose_relaxed(pool, d=d, code="K", locked_today=locked_today, rng=rng)
+                    if not cand: break
+                    if cand.id in tried:
+                        break
+                    tried.add(cand.id)
+                    if can_take(cand.id, "K"):
+                        do_place(d, cand.id, "K", "K_WHITE")
+                        used.add(cand.id)
+                        placed = True
+                        break
+                    pool = [x for x in pool if x.id != cand.id]
+                if not placed:
                     break
-                place(s, planned, day=d, staff_id=cand.id, code="K", position="K_WHITE", save=save)
-                used.add(cand.id); after_place(cand.id, d, "K")
                 kw -= 1
 
             # PGD: K
             need = detail.PGD.get("K", 0)
             while need > 0:
                 pool = [x for x in list(q_gdv) + list(q_tc_day) if x.id not in used and x.id not in locked_today]
-                cand = choose(pool, d=d, code="K", locked_today=locked_today, rng=rng) or \
-                       choose_relaxed(pool, d=d, code="K", locked_today=locked_today, rng=rng)
-                if not cand:
+                tried = set()
+                placed = False
+                while pool:
+                    cand = choose(pool, d=d, code="K", locked_today=locked_today, rng=rng) or \
+                           choose_relaxed(pool, d=d, code="K", locked_today=locked_today, rng=rng)
+                    if not cand: break
+                    if cand.id in tried:
+                        break
+                    tried.add(cand.id)
+                    if can_take(cand.id, "K"):
+                        do_place(d, cand.id, "K", "PGD")
+                        used.add(cand.id)
+                        placed = True
+                        break
+                    pool = [x for x in pool if x.id != cand.id]
+                if not placed:
                     break
-                place(s, planned, day=d, staff_id=cand.id, code="K", position="PGD", save=save)
-                used.add(cand.id); after_place(cand.id, d, "K")
                 need -= 1
 
             # PGD: CA2
             need = detail.PGD.get("CA2", 0)
             while need > 0:
                 pool = [x for x in list(q_gdv) + list(q_tc_day) if x.id not in used and x.id not in locked_today]
-                cand = choose(pool, d=d, code="CA2", locked_today=locked_today, rng=rng) or \
-                       choose_relaxed(pool, d=d, code="CA2", locked_today=locked_today, rng=rng)
-                if not cand:
+                tried = set()
+                placed = False
+                while pool:
+                    cand = choose(pool, d=d, code="CA2", locked_today=locked_today, rng=rng) or \
+                           choose_relaxed(pool, d=d, code="CA2", locked_today=locked_today, rng=rng)
+                    if not cand: break
+                    if cand.id in tried:
+                        break
+                    tried.add(cand.id)
+                    if can_take(cand.id, "CA2"):
+                        do_place(d, cand.id, "CA2", "PGD")
+                        used.add(cand.id)
+                        placed = True
+                        break
+                    pool = [x for x in pool if x.id != cand.id]
+                if not placed:
                     break
-                place(s, planned, day=d, staff_id=cand.id, code="CA2", position="PGD", save=save)
-                used.add(cand.id); after_place(cand.id, d, "CA2")
                 need -= 1
 
             # TD: CA1
             need = detail.TD.get("CA1", 0)
             while need > 0:
                 pool = [x for x in list(q_gdv) + list(q_tc_day) if x.id not in used and x.id not in locked_today]
-                cand = choose(pool, d=d, code="CA1", locked_today=locked_today, rng=rng) or \
-                       choose_relaxed(pool, d=d, code="CA1", locked_today=locked_today, rng=rng)
-                if not cand:
+                tried = set()
+                placed = False
+                while pool:
+                    cand = choose(pool, d=d, code="CA1", locked_today=locked_today, rng=rng) or \
+                           choose_relaxed(pool, d=d, code="CA1", locked_today=locked_today, rng=rng)
+                    if not cand: break
+                    if cand.id in tried:
+                        break
+                    tried.add(cand.id)
+                    if can_take(cand.id, "CA1"):
+                        do_place(d, cand.id, "CA1", "TD")
+                        used.add(cand.id)
+                        placed = True
+                        break
+                    pool = [x for x in pool if x.id != cand.id]
+                if not placed:
                     break
-                place(s, planned, day=d, staff_id=cand.id, code="CA1", position="TD", save=save)
-                used.add(cand.id); after_place(cand.id, d, "CA1")
                 need -= 1
 
             # TD: CA2
             need = detail.TD.get("CA2", 0)
             while need > 0:
                 pool = [x for x in list(q_gdv) + list(q_tc_day) if x.id not in used and x.id not in locked_today]
-                cand = choose(pool, d=d, code="CA2", locked_today=locked_today, rng=rng) or \
-                       choose_relaxed(pool, d=d, code="CA2", locked_today=locked_today, rng=rng)
-                if not cand:
+                tried = set()
+                placed = False
+                while pool:
+                    cand = choose(pool, d=d, code="CA2", locked_today=locked_today, rng=rng) or \
+                           choose_relaxed(pool, d=d, code="CA2", locked_today=locked_today, rng=rng)
+                    if not cand: break
+                    if cand.id in tried:
+                        break
+                    tried.add(cand.id)
+                    if can_take(cand.id, "CA2"):
+                        do_place(d, cand.id, "CA2", "TD")
+                        used.add(cand.id)
+                        placed = True
+                        break
+                    pool = [x for x in pool if x.id != cand.id]
+                if not placed:
                     break
-                place(s, planned, day=d, staff_id=cand.id, code="CA2", position="TD", save=save)
-                used.add(cand.id); after_place(cand.id, d, "CA2")
                 need -= 1
 
             if save: s.commit()
@@ -201,9 +308,49 @@ def schedule_month(
 
         # ====== (TÙY CHỌN) PHA 3: FILL HC CHO NGƯỜI THIẾU CÔNG ======
         if fill_hc:
-            _fill_hc_makeup(s, planned, year, month, holidays, locked, save, profile)
+            # Prepare normalized 'planned' for balancer (day, staff_id, code, position)
+            normalized_planned = [(p.day, p.staff_id, p.shift_code, p.position) for p in planned]
 
-        # Validate: đúng 1 Trưởng ca ngày / ngày
+            # Rebuild 'everyone' and locked map (already loaded above)
+            TC, GDV, HC_staff = load_staff(s)
+            everyone = TC + GDV + HC_staff
+
+            proposals = balance_hc(
+                planned=normalized_planned,
+                staff=everyone,
+                holidays=holidays,
+                year=year,
+                month=month,
+                credits=profile.credit(),
+                tolerance=TOLERANCE,        # 0.9
+                locked_by_day=locked,
+            )
+            # Test check
+            if proposals:
+                # tính tổng công mới sau khi bơm
+                hc_credit = CREDITS.get("HC", 1.0)
+                final_credit = defaultdict(float, credit_map)
+                for d, sid, code, _pos in proposals:
+                    final_credit[sid] += hc_credit
+
+                # ai còn > tolerance?
+                leftovers = [
+                    (sid, base_quota.get(sid, 0.0) - final_credit.get(sid, 0.0))
+                    for sid in base_quota.keys()
+                ]
+                still_high = [(sid, round(defc, 2)) for sid, defc in leftovers if defc > TOLERANCE + 1e-9]
+                if still_high:
+                    print("[BALANCER] Không thể bù hết do thiếu ngày hợp lệ:", still_high[:10], "…")
+
+            # Apply proposals
+            for d, staff_id, shift_code, position in proposals:
+                place(s, planned, day=d, staff_id=staff_id, code=shift_code, position=position, save=save)
+                # intentionally no after_place() — this is the final pass
+
+            if save:
+                s.commit()
+
+        # Validate…
         bad = validate_one_day_leader(planned, first, last)
         if bad:
             return {
@@ -214,67 +361,3 @@ def schedule_month(
             }, 400
 
         return {"ok": True, "planned": exp_planned(planned)}
-
-
-# --------- helper: FILL HC ---------
-def _fill_hc_makeup(s, planned, year, month, holidays, locked, save, profile):
-    """
-    Bù ca HC (TD) cho các nhân sự còn thiếu công so với base_quota.
-    - Chỉ xếp vào T2–T6, không Lễ.
-    - Không đụng vào ngày đã có ca.
-    - Tôn trọng OffDay.
-    - Ưu tiên người thiếu nhiều công trước.
-    """
-    from .repo import load_staff  # dùng lại để lấy danh sách staff mới nhất
-
-    # 1) Tính credits hiện có theo tháng
-    credit_map = defaultdict(float)
-    credits = profile.credit()  # {"CA1":1, "CA2":1, "HC":1, "K":1.25, "Đ":1.5, "P":0}
-
-    # assignments trong vòng đời generate (preview & save đều tích lũy vào planned)
-    by_day_staff = defaultdict(set)  # day -> set(staff_id) đã có ca
-    for p in planned:
-        credit_map[p.staff_id] += credits.get(p.shift_code, 0.0)
-        by_day_staff[p.day].add(p.staff_id)
-
-    # 2) Lấy danh sách staff & quota
-    TC, GDV, HC_staff = load_staff(s)
-    everyone = TC + GDV + HC_staff
-
-    # 3) Lập danh sách “deficit”
-    def remaining(st):  # thiếu bao nhiêu công (>=0)
-        return max(0.0, float(getattr(st, "base_quota", 0)) - credit_map.get(st.id, 0.0))
-
-    candidates = [(st, remaining(st)) for st in everyone]
-    candidates = [(st, r) for (st, r) in candidates if r > 0]  # bỏ ai quota=0 hoặc đã đủ
-    # Sort: người thiếu nhiều công trước
-    candidates.sort(key=lambda x: x[1], reverse=True)
-
-    # 4) Duyệt ngày T2–T6 (không Lễ) và gán HC cho người chưa có ca & còn thiếu
-    first = ymd(year, month, 1)
-    last  = ymd(year, month, month_last_day(year, month))
-    d = first
-    while d <= last and candidates:
-        if d.weekday() < 5 and d not in holidays:
-            locked_today = locked.get(d, set())
-            for i, (st, deficit) in enumerate(list(candidates)):
-                if deficit <= 0:
-                    candidates.pop(i)
-                    continue
-                if st.id in locked_today:
-                    continue
-                if st.id in by_day_staff.get(d, set()):
-                    continue
-                # Gán HC (TD)
-                place(s, planned, day=d, staff_id=st.id, code="HC", position="TD", save=save)
-                after_place(st.id, d, "HC")
-                by_day_staff[d].add(st.id)
-                credit_map[st.id] += credits.get("HC", 1.0)
-                # cập nhật deficit
-                new_def = max(0.0, float(getattr(st, "base_quota", 0)) - credit_map[st.id])
-                candidates[i] = (st, new_def)
-            # lọc lại ai đã đủ
-            candidates = [(st, r) for (st, r) in candidates if r > 1e-9]
-            if save:
-                s.commit()
-        d += timedelta(days=1)
