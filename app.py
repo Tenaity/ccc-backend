@@ -137,17 +137,14 @@ def list_assignments():
 
 @app.post("/api/schedule/generate")
 def gen():
-    """Generate lịch cho (year, month).
-    - save=false (default): preview, không lưu DB, trả planned[]
-    - save=true: ghi DB từ đầu theo cùng tham số (shuffle/seed)
-    - fill_hc (optional): tự động bù ca HC cho người thiếu công (v2)
-    """
     payload = request.get_json(silent=True) or {}
-    today = date.today()
+    from datetime import date as _date
+
+    today = _date.today()
     year = int(payload.get("year", today.year))
     month = int(payload.get("month", today.month))
     if month < 1 or month > 12:
-        return jsonify({"error": "month must be 1..12"}), 400
+        return jsonify({"ok": False, "error": "month must be 1..12"}), 400
 
     shuffle = bool(payload.get("shuffle", False))
     seed = payload.get("seed")
@@ -156,21 +153,25 @@ def gen():
     except Exception:
         seed = None
     save_flag = bool(payload.get("save", False))
-    fill_hc = bool(payload.get("fill_hc", False))  # 👈 NEW: nhận cờ từ frontend
+    fill_hc = bool(payload.get("fill_hc", False))
 
-    # Gọi scheduler; nếu code cũ chưa có tham số fill_hc thì fallback gọi không có tham số
     try:
-        result = generate_schedule(year, month, shuffle=shuffle, seed=seed, save=save_flag, fill_hc=fill_hc)
-    except TypeError:
-        # Phiên bản cũ không nhận fill_hc → vẫn hoạt động bình thường (không auto-fill)
-        result = generate_schedule(year, month, shuffle=shuffle, seed=seed, save=save_flag)
-
-    # ✅ handle cả dict và (dict, status)
-    if isinstance(result, tuple) and len(result) == 2 and isinstance(result[0], dict):
-        body, status = result
-        return jsonify(body), int(status)
-    else:
-        return jsonify(result)
+        res = generate_schedule(year, month,
+                                shuffle=shuffle,
+                                seed=seed,
+                                save=save_flag,
+                                fill_hc=fill_hc)
+        # engine may return a dict or (dict, status)
+        if isinstance(res, tuple) and len(res) == 2 and isinstance(res[0], dict):
+            body, status = res
+            return jsonify(body), int(status)
+        elif isinstance(res, dict):
+            return jsonify(res)
+        else:
+            return jsonify({"ok": False, "error": "Internal error: bad return type"}), 500
+    except Exception as e:
+        # never bubble raw HTML traceback to the frontend
+        return jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}), 500
 
 # ====== Reset DB ======
 @app.post("/api/admin/reset")
