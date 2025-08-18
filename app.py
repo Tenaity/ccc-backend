@@ -11,6 +11,10 @@ from models import init_db, SessionLocal, Staff, FixedAssignment, OffDay, Assign
 from rules import SHIFT_DEFS
 from scheduler import schedule_month as generate_schedule  # schedule_month(year, month, shuffle, seed, save[, fill_hc])
 from scheduler.estimator import estimate_month
+from scheduler.repo import load_staff, load_locked, load_fixed, load_holidays
+from datetime import date, timedelta
+from rules import get_profile
+from scheduler.utils import ymd, month_last_day, day_kind
 
 # Trỏ tới thư mục build của frontend (Vite) nếu đã build
 FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
@@ -134,6 +138,43 @@ def list_assignments():
             }
             for r in rows
         ])
+    
+@app.get("/api/rules/expected")
+def rule_expected():
+    # Lấy year/month (mặc định tháng hiện tại)
+    today = date.today()
+    y = request.args.get("year", type=int) or today.year
+    m = request.args.get("month", type=int) or today.month
+    if m < 1 or m > 12:
+        return jsonify({"ok": False, "error": "month must be 1..12"}), 400
+
+    prof = get_profile()
+
+    first = ymd(y, m, 1)
+    last  = ymd(y, m, month_last_day(y, m))
+
+    s = SessionLocal()
+    try:
+        holidays = load_holidays(s)
+
+        out = {}
+        d = first
+        while d <= last:
+            kind = day_kind(d, holidays)  # "WEEKDAY" | "SAT" | "SUN" | "HOLIDAY"
+            day_spec   = prof.expected_day_counts(kind)   # {"TD": {...}, "PGD": {...}, "K_WHITE": int}
+            night_spec = prof.expected_night_counts(kind) # {"leader": x, "TD_WHITE": y, "PGD": z}
+
+            out[d.day] = {
+                "TD": day_spec["TD"],          # strings: K_leader/CA1/CA2
+                "PGD": day_spec["PGD"],        # strings: K/CA2
+                "K_WHITE": day_spec["K_WHITE"],# int
+                "NIGHT": night_spec,           # leader/TD_WHITE/PGD
+            }
+            d = d + timedelta(days=1)
+
+        return jsonify({"ok": True, "perDayExpected": out})
+    finally:
+        s.close()
 
 @app.post("/api/schedule/generate")
 def gen():
@@ -155,12 +196,15 @@ def gen():
     save_flag = bool(payload.get("save", False))
     fill_hc = bool(payload.get("fill_hc", False))
 
+    print("[API] generate begin", year, month, shuffle, seed, save_flag, fill_hc, flush=True)
+
     try:
         res = generate_schedule(year, month,
                                 shuffle=shuffle,
                                 seed=seed,
                                 save=save_flag,
                                 fill_hc=fill_hc)
+        print("[API] generate end", type(res), flush=True)
         # engine may return a dict or (dict, status)
         if isinstance(res, tuple) and len(res) == 2 and isinstance(res[0], dict):
             body, status = res
@@ -172,7 +216,7 @@ def gen():
     except Exception as e:
         # never bubble raw HTML traceback to the frontend
         return jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}), 500
-
+    
 # ====== Reset DB ======
 @app.post("/api/admin/reset")
 def admin_reset():
