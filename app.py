@@ -9,7 +9,7 @@ from sqlalchemy import select, text
 
 from models import init_db, SessionLocal, Staff, FixedAssignment, OffDay, Assignment, Holiday
 from rules import SHIFT_DEFS
-from scheduler import schedule_month as generate_schedule  # schedule_month(year, month, shuffle, seed, save[, fill_hc])
+from scheduler import schedule_month as generate_schedule  
 from scheduler.estimator import estimate_month
 from scheduler.repo import load_staff, load_locked, load_fixed, load_holidays
 from datetime import date, timedelta
@@ -134,47 +134,52 @@ def list_assignments():
                 "day": r.day.isoformat(),
                 "shift_code": r.shift_code,
                 "staff_id": r.staff_id,
-                "position": r.position,  # PGD | TD | K_WHITE | None
+                "position": r.position,  # PGD | TD | None
             }
             for r in rows
         ])
     
 @app.get("/api/rules/expected")
 def rule_expected():
-    # Lấy year/month (mặc định tháng hiện tại)
     today = date.today()
     y = request.args.get("year", type=int) or today.year
     m = request.args.get("month", type=int) or today.month
-    if m < 1 or m > 12:
-        return jsonify({"ok": False, "error": "month must be 1..12"}), 400
-
     prof = get_profile()
 
     first = ymd(y, m, 1)
     last  = ymd(y, m, month_last_day(y, m))
 
-    s = SessionLocal()
-    try:
-        holidays = load_holidays(s)
+    out = {}
+    d = first
+    # nạp holiday 1 lần
+    holidays = load_holidays(SessionLocal())
+    while d <= last:
+        kind = day_kind(d, holidays)
 
-        out = {}
-        d = first
-        while d <= last:
-            kind = day_kind(d, holidays)  # "WEEKDAY" | "SAT" | "SUN" | "HOLIDAY"
-            day_spec   = prof.expected_day_counts(kind)   # {"TD": {...}, "PGD": {...}, "K_WHITE": int}
-            night_spec = prof.expected_night_counts(kind) # {"leader": x, "TD_WHITE": y, "PGD": z}
+        day = prof.expected_day_counts(kind)      # {"TD": {"K":..,"CA1":..,"CA2":..}, "PGD": {"K":..,"CA2":..}}
+        night = prof.expected_night_counts(kind)  # {"TD": {"Đ": x}, "PGD": {"Đ": y}}  (từ NightDetail.to_engine_dict)
 
-            out[d.day] = {
-                "TD": day_spec["TD"],          # strings: K_leader/CA1/CA2
-                "PGD": day_spec["PGD"],        # strings: K/CA2
-                "K_WHITE": day_spec["K_WHITE"],# int
-                "NIGHT": night_spec,           # leader/TD_WHITE/PGD
-            }
-            d = d + timedelta(days=1)
+        td = day.get("TD", {})
+        pgd = day.get("PGD", {})
+        n_td = (night.get("TD", {}) or {})
+        n_pgd = (night.get("PGD", {}) or {})
 
-        return jsonify({"ok": True, "perDayExpected": out})
-    finally:
-        s.close()
+        out[d.day] = {
+            "expectedTD": {
+                "K":   int(td.get("K", 0)),
+                "CA1": int(td.get("CA1", 0)),
+                "CA2": int(td.get("CA2", 0)),
+                "D":   int(n_td.get("Đ", 0)),   # gộp Đ (đêm @ TD)
+            },
+            "expectedPGD": {
+                "K":   int(pgd.get("K", 0)),
+                "CA2": int(pgd.get("CA2", 0)),
+                "D":   int(n_pgd.get("Đ", 0)),  # gộp Đ (đêm @ PGD)
+            },
+        }
+        d = d + timedelta(days=1)
+
+    return jsonify({"ok": True, "perDayExpected": out})
 
 @app.post("/api/schedule/generate")
 def gen():

@@ -1,4 +1,4 @@
-# backend/rules/base.py
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict
@@ -14,29 +14,45 @@ SHIFT_DEFS = [
     ShiftCode.P.value,
 ]
 
-# ---- Kiểu cho phần ngày ----
-DayTD  = Dict[str, int]            # keys: "K_leader", "CA1", "CA2"
-DayPGD = Dict[ShiftCode, int]      # keys: ShiftCode.K, ShiftCode.CA2
+# ---- Kiểu cho phần NGÀY ----
+DayTD  = Dict[ShiftCode, int]   # ví dụ: {ShiftCode.K:1, ShiftCode.CA1:2, ShiftCode.CA2:4}
+DayPGD = Dict[ShiftCode, int]   # ví dụ: {ShiftCode.K:1, ShiftCode.CA2:1}
 
 @dataclass(frozen=True)
 class DayDetail:
     TD: DayTD
     PGD: DayPGD
-    K_WHITE: int = 0               # chỉ có ở Thứ 7
 
-    def to_engine_dict(self) -> Dict[str, Any]:
-        """Chuẩn hoá sang dict dùng trong engine/UI (PGD đổi key sang string)."""
+    def to_engine_dict(self) -> Dict[str, Dict[str, int]]:
+        """
+        Chuẩn hoá sang dict cho engine/UI:
+        - key là string (".value" của enum)
+        - KHÔNG còn 'K_leader' hay 'K_WHITE' ở đây; 'leader/K_white' do POSITION quyết định ở engine.
+        """
         return {
-            "TD": self.TD,
+            "TD":  {k.value: v for k, v in self.TD.items()},
             "PGD": {k.value: v for k, v in self.PGD.items()},
-            "K_WHITE": self.K_WHITE,   # lưu ý: đây là int, nên return type cần Any
         }
+
+# ---- Kiểu cho phần ĐÊM ----
+NightTD  = Dict[ShiftCode, int]   # ví dụ: {ShiftCode.K:1, ShiftCode.CA1:2, ShiftCode.CA2:4}
+NightPGD = Dict[ShiftCode, int]   # ví dụ: {ShiftCode.K:1, ShiftCode.CA2:1}
 
 @dataclass(frozen=True)
 class NightDetail:
-    leader: int      # Đ @ TD (trưởng ca đêm)
-    TD_white: int    # Đ trắng @ TD
-    PGD: int         # Đ @ PGD
+    TD: NightTD
+    PGD: NightPGD
+
+    def to_engine_dict(self) -> Dict[str, Dict[str, int]]:
+        """
+        Chuẩn hoá sang dict cho engine/UI:
+        - key là string (".value" của enum)
+        - KHÔNG còn 'K_leader' hay 'K_WHITE' ở đây; 'leader/K_white' do POSITION quyết định ở engine.
+        """
+        return {
+            "TD":  {k.value: v for k, v in self.TD.items()},
+            "PGD": {k.value: v for k, v in self.PGD.items()},
+        }
 
 class RuleProfile:
     """Interface chung; mỗi phòng ban triển khai 1 profile."""
@@ -49,14 +65,31 @@ class RuleProfile:
         raise NotImplementedError
 
     def credit(self) -> Dict[str, float]:
-        # Trả map string->float để các phần còn lại không cần biết enum
+        """
+        Trả map string->float để các phần còn lại (engine/DB/UI) không cần biết enum.
+        Ví dụ: {"CA1":1, "CA2":1, "K":1.25, "HC":1, "Đ":1.5, "P":0}
+        """
         return {k.value: v for k, v in CREDITS.items()}
 
-    # ===== Helpers cho TotalsRows/estimate (optional) =====
-    def expected_day_counts(self, kind: DayKind | str) -> Dict[str, Any]:
-        """Trả cấu trúc giống perDayByPlace của UI (TD/PGD/K_WHITE)."""
+    # ===== Helpers cho TotalsRows/estimate (tùy dùng) =====
+    def expected_day_counts(self, kind: DayKind | str) -> Dict[str, Dict[str, int]]:
+        """
+        Trả cấu trúc cùng shape với perDayByPlace (phần NGÀY):
+        {
+          "TD":  {"K":1,"CA1":2,"CA2":4},
+          "PGD": {"K":1,"CA2":1}
+        }
+        Lưu ý: KHÔNG có "K_WHITE" ở đây (K trắng sẽ do engine quyết định theo POSITION).
+        """
         return self.day_detail(kind).to_engine_dict()
 
-    def expected_night_counts(self, kind: DayKind | str) -> Dict[str, int]:
-        n = self.night_detail(kind)
-        return {"leader": n.leader, "TD_WHITE": n.TD_white, "PGD": n.PGD}
+    def expected_night_counts(self, kind: DayKind | str) -> Dict[str, Dict[str, int]]:
+        """
+        Trả cấu trúc cùng shape với perDayByPlace (phần NGÀY):
+        {
+          "TD":  {"K":1,"Đ":2,},
+          "PGD": {"Đ":2}
+        }
+        Lưu ý: KHÔNG có "K_WHITE" ở đây (K trắng sẽ do engine quyết định theo POSITION). Đ cũng sẽ quyết dịnh theo position.
+        """
+        return self.night_detail(kind).to_engine_dict()
