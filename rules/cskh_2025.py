@@ -10,34 +10,36 @@ class CSKH2025(RuleProfile):
         k = DayKind(kind) if isinstance(kind, str) else kind
 
         if k == DayKind.WEEKDAY:
-            # TD: 1 K_leader + 2 CA1 + 4 CA2
-            # PGD: 1 K + 1 CA2
+            # T2–T6
             return DayDetail(
-                TD={"K_leader": 1, "CA1": 2, "CA2": 4},
-                PGD={ShiftCode.K: 1, ShiftCode.CA2: 1},
-                K_WHITE=0,
+                TD={ShiftCode.K: 1, ShiftCode.CA1: 2, ShiftCode.CA2: 4},
+                PGD={ShiftCode.K: 1, ShiftCode.CA2: 1}, # K đỏ trực chatbot 
             )
         if k == DayKind.SAT:
-            # TD: 1 K_leader + 2 CA1 + 2 CA2 + K_WHITE (1)
-            # PGD: 1 K
+            # Thứ 7
             return DayDetail(
-                TD={"K_leader": 1, "CA1": 2, "CA2": 2},
-                PGD={ShiftCode.K: 1},
-                K_WHITE=1,
+                TD={ShiftCode.K: 1, ShiftCode.CA1: 2, ShiftCode.CA2: 2},
+                PGD={ShiftCode.K: 2},  # 1 K “đỏ trực chatbot” + 1 K “trắng” (engine xác định position)
             )
-        # SUN / HOLIDAY
+        # CN / Lễ
         return DayDetail(
-            TD={"K_leader": 1, "CA1": 1, "CA2": 1},
-            PGD={},  # none at PGD
-            K_WHITE=0,
+            TD={ShiftCode.K: 1, ShiftCode.CA1: 1, ShiftCode.CA2: 1},
+            PGD={},
         )
 
     def night_detail(self, kind: DayKind | str) -> NightDetail:
         k = DayKind(kind) if isinstance(kind, str) else kind
 
         if k in (DayKind.WEEKDAY, DayKind.SAT):
-            # Night: TD leader 1 + 2 TD_WHITE + 2 PGD
-            return NightDetail(leader=1, TD_white=2, PGD=2)
-
-        # SUN / HOLIDAY: 0 leader, 0 TD_WHITE, 2 PGD
-        return NightDetail(leader=0, TD_white=0, PGD=2)
+            # Đêm T2–T7: 1 Đ leader, 2 Đ trắng, 2 Đ PGD
+            # Ở đây chỉ định số lượng ca Đ chung, vị trí (leader/white/PGD) để engine phân
+            return NightDetail(
+                TD={ShiftCode.D: 3},   # gồm 1 leader + 2 trắng
+                PGD={ShiftCode.D: 2},  # 2 PGD
+            )
+        # CN / Lễ: chỉ có 2 PGD
+        # Ở đây chỉ định số lượng ca Đ PGD, không có trưởng cả cho ngày chủ nhật
+        return NightDetail(
+            TD={}, 
+            PGD={ShiftCode.D: 2},
+        )

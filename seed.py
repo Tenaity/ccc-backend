@@ -5,20 +5,16 @@ from models import init_db, SessionLocal, Staff
 # ===== DANH SÁCH THEO ẢNH =====
 
 TC_MAIN = [
-    "Mai Công Tuấn",
-    "Lê Thị Ngọc Linh",
-    "Trần Văn Phong",
-    "Nguyễn Phương Thanh",
-    "Nguyễn Thị Thu Hương",  # thêm TC chính
+    "Mai Công Tuấn", # ID 1968
+    "Lê Thị Ngọc Linh", # ID 1994
+    "Trần Văn Phong", # ID 1972
+    "Nguyễn Phương Thanh", # ID 1981
+    "Nguyễn Thị Thu Hương",  # ID 1965
 ]
-
-# Không còn TC phụ/backup theo sheet mới -> để trống
-TC_SUB = []
-TC_BACKUP = []
 
 GDV = [
     # Ghi chú: Phạm Khánh Linh nghỉ sinh -> base_quota=0 để không tính công
-    "Phạm Khánh Linh",
+    "Phạm Khánh Linh", # ID 
     "Nguyễn Thị Thu Thủy",
     "Trần Phương Ly",
     "Trần Thị Thùy Trang",
@@ -89,10 +85,6 @@ def run():
     # Trưởng ca (làm đêm được)
     for name in TC_MAIN:
         upsert_staff(name, role="TC", can_night=True, notes="TC chính")
-    for name in TC_SUB:
-        upsert_staff(name, role="TC", can_night=True, notes="TC phụ")
-    for name in TC_BACKUP:
-        upsert_staff(name, role="TC", can_night=False, notes="TC backup")
 
     # GDV
     for name in GDV:
