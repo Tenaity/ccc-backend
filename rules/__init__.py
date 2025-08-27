@@ -4,7 +4,7 @@ import os
 
 # Export các kiểu & profile base
 from .base import RuleProfile, DayDetail, NightDetail, SHIFT_DEFS
-# ===== NEW: alias tương thích ngược cho placements.py =====
+# Alias tương thích ngược
 from .types import CREDITS as CREDIT, ShiftCode, Position, DayKind
 
 # Load profile CSKH_2025
@@ -21,8 +21,6 @@ def get_profile(name: str | None = None) -> RuleProfile:
 __all__ = [
     "RuleProfile", "DayDetail", "NightDetail", "SHIFT_DEFS",
     "get_profile",
-    # enum/types (tuỳ frontend có xài hay không)
     "ShiftCode", "Position", "DayKind",
-    # ===== giữ tương thích ngược =====
-    "CREDIT",   # alias -> CREDITS
+    "CREDIT",
 ]
