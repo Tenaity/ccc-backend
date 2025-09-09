@@ -113,6 +113,112 @@ def del_staff(staff_id: int):
         s.commit()
         return {"ok": True}
 
+
+@app.get("/api/off")
+def list_off_days():
+    """List off days for a given month (defaults to current)."""
+    today = date.today()
+    y = request.args.get("year", type=int) or today.year
+    m = request.args.get("month", type=int) or today.month
+
+    if m < 1 or m > 12:
+        return {"error": "month must be 1..12"}, 400
+
+    last_day = calendar.monthrange(y, m)[1]
+    start = date(y, m, 1)
+    end = date(y, m, last_day)
+    print(f"[API] off GET {y}-{m}", flush=True)
+
+    try:
+        with SessionLocal() as s:
+            rows = (
+                s.query(OffDay, Staff)
+                .join(Staff, OffDay.staff_id == Staff.id)
+                .filter(OffDay.day.between(start, end))
+                .all()
+            )
+            out = [
+                {
+                    "id": od.id,
+                    "staff_id": od.staff_id,
+                    "staff_name": st.full_name,
+                    "day": od.day.isoformat(),
+                    "reason": od.reason,
+                }
+                for od, st in rows
+            ]
+            return jsonify(out)
+    except Exception as e:
+        return (
+            jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}),
+            500,
+        )
+
+
+@app.post("/api/off")
+def create_off_day():
+    data = request.get_json(force=True) or {}
+    staff_id = data.get("staff_id")
+    day_str = data.get("day")
+    reason = data.get("reason")
+
+    if staff_id is None or day_str is None:
+        return {"error": "staff_id and day required"}, 400
+
+    try:
+        staff_id = int(staff_id)
+    except Exception:
+        return {"error": "staff_id must be int"}, 400
+
+    try:
+        d = date.fromisoformat(day_str)
+    except Exception:
+        return {"error": "day must be YYYY-MM-DD"}, 400
+
+    print(f"[API] off POST {staff_id} {day_str}", flush=True)
+
+    try:
+        with SessionLocal() as s:
+            staff = s.get(Staff, staff_id)
+            if not staff:
+                return {"error": "Staff not found"}, 404
+
+            existing = (
+                s.query(OffDay)
+                .filter(OffDay.staff_id == staff_id, OffDay.day == d)
+                .first()
+            )
+            if existing:
+                return {"id": existing.id, "ok": True}
+
+            off = OffDay(staff_id=staff_id, day=d, reason=reason)
+            s.add(off)
+            s.commit()
+            return {"id": off.id, "ok": True}, 201
+    except Exception as e:
+        return (
+            jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}),
+            500,
+        )
+
+
+@app.delete("/api/off/<int:off_id>")
+def delete_off_day(off_id: int):
+    print(f"[API] off DELETE {off_id}", flush=True)
+    try:
+        with SessionLocal() as s:
+            r = s.get(OffDay, off_id)
+            if not r:
+                return {"error": "Not found"}, 404
+            s.delete(r)
+            s.commit()
+            return {"ok": True}
+    except Exception as e:
+        return (
+            jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}),
+            500,
+        )
+
 @app.get("/api/assignments")
 def list_assignments():
     """Trả danh sách phân ca theo tháng (mặc định tháng hiện tại nếu thiếu params)."""
