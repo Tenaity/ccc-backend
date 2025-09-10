@@ -28,6 +28,9 @@ _last_day: Dict[int, date] = {}
 _credit: Dict[int, float] = {}
 _weekend: Dict[int, Dict[str, int]] = {}  # {"sat": n, "sun": n}
 
+# optional hook for fairness window
+_fair_hook = None
+
 # Ép kiểu rõ ràng để Pylance không báo lỗi khi .get(...)
 CREDIT: Dict[str, float] = cast(Dict[str, float], RULE_CREDIT)
 
@@ -43,6 +46,12 @@ def reset_trackers() -> None:
 def credit_of(code: str) -> float:
     """Trả về trọng số công của mã ca."""
     return float(CREDIT.get(code, 0.0))
+
+
+def set_fairness_hook(hook) -> None:
+    """Set callback invoked on every placement."""
+    global _fair_hook
+    _fair_hook = hook
 
 
 def place(
@@ -62,6 +71,12 @@ def place(
     """
     rec = Planned(day=day, staff_id=staff_id, shift_code=code, position=position)
     planned.append(rec)
+
+    if _fair_hook is not None:
+        try:
+            _fair_hook(staff_id, code, position)
+        except Exception:
+            pass
 
     if save and session is not None:
         session.add(Assignment(day=day, staff_id=staff_id, shift_code=code, position=position))
