@@ -5,6 +5,7 @@ from datetime import date
 import random
 
 from scheduler.engine.phase_day import run_phase_day
+from scheduler.engine.utils_rank import FairnessWindow
 from rules.types import ShiftCode
 
 
@@ -55,11 +56,13 @@ def test_fixed_assignments_do_not_duplicate():
         rng=random.Random(0),
     )
 
+    fair = FairnessWindow(rank_map={7:1,8:2,6:1,1:1,2:1,3:1,4:1,5:1})
+
     # Pre-existing PGD assignments (simulate fixed at PGD)
     do_place(d, 4, "K", "PGD")
     do_place(d, 5, "CA2", "PGD")
 
-    run_phase_day(ctx, d, d)
+    run_phase_day(ctx, d, d, fair)
 
     assert len(planned) == 5
 

@@ -8,7 +8,8 @@ from .core import build_context, close_context, TOLERANCE
 from .phase_night import run_phase_night
 from .phase_day import run_phase_day
 from ..balancer import balance_hc
-from ..placements import reset_trackers, exp_planned, place
+from ..placements import reset_trackers, exp_planned, place, set_fairness_hook
+from .utils_rank import FairnessWindow
 from ..validators import validate_one_day_leader
 from rules import get_profile  # ⬅️ để lấy expected nếu cần đối chiếu nhanh
 from scheduler.utils import day_kind  # ⬅️ dùng khi đối chiếu expected từng ngày
@@ -26,6 +27,12 @@ def schedule_month(
     reset_trackers()
 
     ctx, first, last = build_context(year=year, month=month, shuffle=shuffle, seed=seed, save=save)
+    # build rank map for fairness
+    rank_map = {st.id: 1 for st in ctx.GDV1}
+    rank_map.update({st.id: 1 for st in ctx.TC})
+    rank_map.update({st.id: 2 for st in ctx.GDV2})
+    fair = FairnessWindow(rank_map=rank_map)
+    set_fairness_hook(fair.bump)
 
     try:
         # (0) Scatter HC mặc định
@@ -49,14 +56,14 @@ def schedule_month(
 
         # (1) NIGHT
         print("[ENGINE] phase1: NIGHT")
-        night_miss: List[date] = run_phase_night(ctx, first, last) or []   # ⬅️ rõ type
+        night_miss: List[date] = run_phase_night(ctx, first, last, fair) or []   # ⬅️ rõ type
         if night_miss:
             print("[ENGINE] NIGHT_MISS (no night leader):", [x.isoformat() for x in night_miss[:10]], "…")
 
         # (2) DAY
         print("[ENGINE] phase2: DAY")
         before_day = len(ctx._planned)
-        run_phase_day(ctx, first, last)
+        run_phase_day(ctx, first, last, fair)
         after_day = len(ctx._planned)
         print(f"[ENGINE] phase2 done: placed={after_day - before_day}, total={after_day}")
 
@@ -128,4 +135,5 @@ def schedule_month(
         return body
 
     finally:
+        set_fairness_hook(None)
         close_context(ctx)

@@ -5,7 +5,7 @@ from typing import List, Set
 from datetime import date, timedelta
 
 from .core import Context
-from .utils_rank import ChoiceCtx, fill_ranked_slots  # dùng bản trong engine/
+from .utils_rank import ChoiceCtx, fill_ranked_slots, budget_for_day, FairnessWindow  # dùng bản trong engine/
 from scheduler.utils import day_kind
 from scheduler.randomize import CFG as RAND_CFG
 
@@ -31,7 +31,7 @@ def _get_total(night_detail: dict, place_key: str) -> int:
         return int(box.get("Đ", 0) or 0)
 
 
-def run_phase_night(ctx: Context, first: date, last: date) -> List[date]:
+def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow) -> List[date]:
     """
     Phase NIGHT (cân bằng rank cho GDV):
       1) Leader Đ @ TD: chỉ chọn từ TC (ưu tiên can_take, cuối cùng có thể overcap).
@@ -43,6 +43,7 @@ def run_phase_night(ctx: Context, first: date, last: date) -> List[date]:
 
     d = first
     while d <= last:
+        fair.new_day(d)
         used: Set[int] = {p.staff_id for p in ctx._planned if p.day == d}
         locked_today = ctx.locked.get(d, set())
         for sid in sorted(locked_today):
@@ -139,12 +140,13 @@ def run_phase_night(ctx: Context, first: date, last: date) -> List[date]:
         td_remain = max(td_total - (1 if placed_leader else 0), 0)
         if td_remain > 0:
             _log(ctx, f"  TD.D remaining={td_remain} (after leader)")
+            budget = budget_for_day(d, "TD.Đ", td_remain)
             cc = ChoiceCtx(d=d, code="Đ", locked_today=locked_today, ctx=ctx, used=used)
 
             pool_top1 = [x for x in list(ctx.q_gdv1) if x.id not in used and getattr(x, "can_night", True)]
             pool_top2 = [x for x in list(ctx.q_gdv2) if x.id not in used and getattr(x, "can_night", True)]
 
-            ids = fill_ranked_slots(need=td_remain, pool_top1=pool_top1, pool_top2=pool_top2, cc=cc)
+            ids = fill_ranked_slots(need=td_remain, pool_top1=pool_top1, pool_top2=pool_top2, cc=cc, fairness=fair, position="TD", want=budget)
 
             placed = 0
             for sid in ids:
@@ -174,13 +176,18 @@ def run_phase_night(ctx: Context, first: date, last: date) -> List[date]:
                 if remain > 0:
                     _log(ctx, f"  TD.D short={remain}")
 
+            got1, got2 = fair.today_for("Đ", "TD")
+            win1, win2 = fair.summary("Đ", "TD")
+            print(f"[FAIR] {d.isoformat()} TD.Đ want r1={budget[1]} r2={budget[2]} | got r1={got1} r2={got2} | window7 r1={win1} r2={win2}")
+
         # ===== 3) Đ @ PGD =====
         if pgd_total > 0:
             _log(ctx, f"  PGD.D need={pgd_total}")
+            budget = budget_for_day(d, "PGD.Đ", pgd_total)
             cc = ChoiceCtx(d=d, code="Đ", locked_today=locked_today, ctx=ctx, used=used)
             pool_top1 = [x for x in list(ctx.q_gdv1) if x.id not in used and getattr(x, "can_night", True)]
             pool_top2 = [x for x in list(ctx.q_gdv2) if x.id not in used and getattr(x, "can_night", True)]
-            ids = fill_ranked_slots(need=pgd_total, pool_top1=pool_top1, pool_top2=pool_top2, cc=cc)
+            ids = fill_ranked_slots(need=pgd_total, pool_top1=pool_top1, pool_top2=pool_top2, cc=cc, fairness=fair, position="PGD", want=budget)
 
             placed = 0
             for sid in ids:
@@ -208,6 +215,10 @@ def run_phase_night(ctx: Context, first: date, last: date) -> List[date]:
                         remain -= 1
                 if remain > 0:
                     _log(ctx, f"  PGD.D short={remain}")
+
+            got1, got2 = fair.today_for("Đ", "PGD")
+            win1, win2 = fair.summary("Đ", "PGD")
+            print(f"[FAIR] {d.isoformat()} PGD.Đ want r1={budget[1]} r2={budget[2]} | got r1={got1} r2={got2} | window7 r1={win1} r2={win2}")
 
         # ===== summary ngày
         _log(ctx, f"summary {d.isoformat()} | leader={leader_id if placed_leader else '-'} | TD.D={td_total} | PGD.D={pgd_total}")

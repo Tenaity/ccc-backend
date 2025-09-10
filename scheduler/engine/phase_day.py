@@ -7,16 +7,17 @@ from datetime import date, timedelta
 from rules.types import ShiftCode
 from .core import Context
 from scheduler.utils import day_kind
-from .utils_rank import ChoiceCtx, fill_ranked_slots
+from .utils_rank import ChoiceCtx, fill_ranked_slots, budget_for_day, FairnessWindow
 
 
 def _log(_: Context, msg: str):
     print(f"[DAY ] {msg}")
 
 
-def run_phase_day(ctx: Context, first: date, last: date):
+def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
     d = first
     while d <= last:
+        fair.new_day(d)
         locked_today: Set[int] = ctx.locked.get(d, set())
         for sid in sorted(locked_today):
             _log(ctx, f"{d.isoformat()} SKIP (locked) #{sid}")
@@ -102,49 +103,77 @@ def run_phase_day(ctx: Context, first: date, last: date):
             else:
                 _log(ctx, f"{d.isoformat()} TD.K leader MISS (usable={ [x.id for x in pool_tc] })")
 
-        # ============ 3) PGD · K (đỏ) ============
-        if pgd_k_need > 0:
-            cc = ChoiceCtx(d=d, code="K", locked_today=locked_today, used=used, ctx=ctx)
-            ids = fill_ranked_slots(need=pgd_k_need,
-                                    pool_top1=ctx.q_gdv1,
-                                    pool_top2=ctx.q_gdv2,
-                                    cc=cc)
-            for sid in ids:
-                ctx.do_place(d, sid, "K", "PGD")
-                _log(ctx, f"{d.isoformat()} PGD.K -> #{sid}")
-
-        # ============ 4) PGD · CA2 ============
-        if pgd_ca2_need > 0:
-            cc = ChoiceCtx(d=d, code="CA2", locked_today=locked_today, used=used, ctx=ctx)
-            ids = fill_ranked_slots(need=pgd_ca2_need,
-                                    pool_top1=ctx.q_gdv1,
-                                    pool_top2=ctx.q_gdv2,
-                                    cc=cc)
-            for sid in ids:
-                ctx.do_place(d, sid, "CA2", "PGD")
-                _log(ctx, f"{d.isoformat()} PGD.CA2 -> #{sid}")
-
-        # ============ 5) TD · CA1 ============
+        # ============ 3) TD · CA1 ============
         if td_ca1_need > 0:
+            budget = budget_for_day(d, "TD.CA1", td_ca1_need)
             cc = ChoiceCtx(d=d, code="CA1", locked_today=locked_today, used=used, ctx=ctx)
             ids = fill_ranked_slots(need=td_ca1_need,
                                     pool_top1=ctx.q_gdv1,
                                     pool_top2=ctx.q_gdv2,
-                                    cc=cc)
+                                    cc=cc,
+                                    fairness=fair,
+                                    position="TD",
+                                    want=budget)
             for sid in ids:
                 ctx.do_place(d, sid, "CA1", "TD")
                 _log(ctx, f"{d.isoformat()} TD.CA1 -> #{sid}")
+            got1, got2 = fair.today_for("CA1", "TD")
+            win1, win2 = fair.summary("CA1", "TD")
+            print(f"[FAIR] {d.isoformat()} TD.CA1 want r1={budget[1]} r2={budget[2]} | got r1={got1} r2={got2} | window7 r1={win1} r2={win2}")
 
-        # ============ 6) TD · CA2 ============
+        # ============ 4) TD · CA2 ============
         if td_ca2_need > 0:
+            budget = budget_for_day(d, "TD.CA2", td_ca2_need)
             cc = ChoiceCtx(d=d, code="CA2", locked_today=locked_today, used=used, ctx=ctx)
             ids = fill_ranked_slots(need=td_ca2_need,
                                     pool_top1=ctx.q_gdv1,
                                     pool_top2=ctx.q_gdv2,
-                                    cc=cc)
+                                    cc=cc,
+                                    fairness=fair,
+                                    position="TD",
+                                    want=budget)
             for sid in ids:
                 ctx.do_place(d, sid, "CA2", "TD")
                 _log(ctx, f"{d.isoformat()} TD.CA2 -> #{sid}")
+            got1, got2 = fair.today_for("CA2", "TD")
+            win1, win2 = fair.summary("CA2", "TD")
+            print(f"[FAIR] {d.isoformat()} TD.CA2 want r1={budget[1]} r2={budget[2]} | got r1={got1} r2={got2} | window7 r1={win1} r2={win2}")
+
+        # ============ 5) PGD · K (đỏ) ============
+        if pgd_k_need > 0:
+            budget = budget_for_day(d, "PGD.K", pgd_k_need)
+            cc = ChoiceCtx(d=d, code="K", locked_today=locked_today, used=used, ctx=ctx)
+            ids = fill_ranked_slots(need=pgd_k_need,
+                                    pool_top1=ctx.q_gdv1,
+                                    pool_top2=ctx.q_gdv2,
+                                    cc=cc,
+                                    fairness=fair,
+                                    position="PGD",
+                                    want=budget)
+            for sid in ids:
+                ctx.do_place(d, sid, "K", "PGD")
+                _log(ctx, f"{d.isoformat()} PGD.K -> #{sid}")
+            got1, got2 = fair.today_for("K", "PGD")
+            win1, win2 = fair.summary("K", "PGD")
+            print(f"[FAIR] {d.isoformat()} PGD.K want r1={budget[1]} r2={budget[2]} | got r1={got1} r2={got2} | window7 r1={win1} r2={win2}")
+
+        # ============ 6) PGD · CA2 ============
+        if pgd_ca2_need > 0:
+            budget = budget_for_day(d, "PGD.CA2", pgd_ca2_need)
+            cc = ChoiceCtx(d=d, code="CA2", locked_today=locked_today, used=used, ctx=ctx)
+            ids = fill_ranked_slots(need=pgd_ca2_need,
+                                    pool_top1=ctx.q_gdv1,
+                                    pool_top2=ctx.q_gdv2,
+                                    cc=cc,
+                                    fairness=fair,
+                                    position="PGD",
+                                    want=budget)
+            for sid in ids:
+                ctx.do_place(d, sid, "CA2", "PGD")
+                _log(ctx, f"{d.isoformat()} PGD.CA2 -> #{sid}")
+            got1, got2 = fair.today_for("CA2", "PGD")
+            win1, win2 = fair.summary("CA2", "PGD")
+            print(f"[FAIR] {d.isoformat()} PGD.CA2 want r1={budget[1]} r2={budget[2]} | got r1={got1} r2={got2} | window7 r1={win1} r2={win2}")
 
         if ctx.save:
             ctx.session.commit()
