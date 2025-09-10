@@ -1,16 +1,18 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import Set, List
+
+from typing import Set
 from datetime import date, timedelta
 
 from rules.types import ShiftCode
 from .core import Context
 from scheduler.utils import day_kind
-# from engine.utils_rank import ChoiceCtx, fill_ranked_slots
-from .utils_rank import ChoiceCtx, fill_ranked_slots, split_need  # tuỳ cái nào bạn dùng
+from .utils_rank import ChoiceCtx, fill_ranked_slots
+
 
 def _log(_: Context, msg: str):
     print(f"[DAY ] {msg}")
+
 
 def run_phase_day(ctx: Context, first: date, last: date):
     d = first
@@ -34,9 +36,29 @@ def run_phase_day(ctx: Context, first: date, last: date):
             used.add(r.staff_id)
             _log(ctx, f"{d.isoformat()} FIXED {r.shift_code}@TD -> #{r.staff_id}")
 
+        # Đếm số lượng đã được phân ca trước khi dispatch thêm
+        td_k_filled = pgd_k_filled = pgd_ca2_filled = td_ca1_filled = td_ca2_filled = 0
+        for p in ctx._planned:
+            if p.day != d:
+                continue
+            if p.position == "TD" and p.shift_code == ShiftCode.K:
+                td_k_filled += 1
+            elif p.position == "PGD" and p.shift_code == ShiftCode.K:
+                pgd_k_filled += 1
+            elif p.position == "PGD" and p.shift_code == ShiftCode.CA2:
+                pgd_ca2_filled += 1
+            elif p.position == "TD" and p.shift_code == ShiftCode.CA1:
+                td_ca1_filled += 1
+            elif p.position == "TD" and p.shift_code == ShiftCode.CA2:
+                td_ca2_filled += 1
+
+        k_td_need = max(int(detail.TD.get(ShiftCode.K, 0)) - td_k_filled, 0)
+        pgd_k_need = max(int(detail.PGD.get(ShiftCode.K, 0)) - pgd_k_filled, 0)
+        pgd_ca2_need = max(int(detail.PGD.get(ShiftCode.CA2, 0)) - pgd_ca2_filled, 0)
+        td_ca1_need = max(int(detail.TD.get(ShiftCode.CA1, 0)) - td_ca1_filled, 0)
+        td_ca2_need = max(int(detail.TD.get(ShiftCode.CA2, 0)) - td_ca2_filled, 0)
+
         # ============ 2) TD · K (leader) = từ TC ============
-                # ============ 2) TD · K (leader) = từ TC ============
-        k_td_need = int(detail.TD.get(ShiftCode.K, 0))
         if k_td_need > 0:
             # Pool TC hợp lệ trong ngày d
             pool_ids_before = [x.id for x in ctx.q_tc_day]
@@ -76,7 +98,6 @@ def run_phase_day(ctx: Context, first: date, last: date):
                 _log(ctx, f"{d.isoformat()} TD.K leader MISS (usable={ [x.id for x in pool_tc] })")
 
         # ============ 3) PGD · K (đỏ) ============
-        pgd_k_need = int(detail.PGD.get(ShiftCode.K, 0))
         if pgd_k_need > 0:
             cc = ChoiceCtx(d=d, code="K", locked_today=locked_today, used=used, ctx=ctx)
             ids = fill_ranked_slots(need=pgd_k_need,
@@ -88,7 +109,6 @@ def run_phase_day(ctx: Context, first: date, last: date):
                 _log(ctx, f"{d.isoformat()} PGD.K -> #{sid}")
 
         # ============ 4) PGD · CA2 ============
-        pgd_ca2_need = int(detail.PGD.get(ShiftCode.CA2, 0))
         if pgd_ca2_need > 0:
             cc = ChoiceCtx(d=d, code="CA2", locked_today=locked_today, used=used, ctx=ctx)
             ids = fill_ranked_slots(need=pgd_ca2_need,
@@ -100,7 +120,6 @@ def run_phase_day(ctx: Context, first: date, last: date):
                 _log(ctx, f"{d.isoformat()} PGD.CA2 -> #{sid}")
 
         # ============ 5) TD · CA1 ============
-        td_ca1_need = int(detail.TD.get(ShiftCode.CA1, 0))
         if td_ca1_need > 0:
             cc = ChoiceCtx(d=d, code="CA1", locked_today=locked_today, used=used, ctx=ctx)
             ids = fill_ranked_slots(need=td_ca1_need,
@@ -112,7 +131,6 @@ def run_phase_day(ctx: Context, first: date, last: date):
                 _log(ctx, f"{d.isoformat()} TD.CA1 -> #{sid}")
 
         # ============ 6) TD · CA2 ============
-        td_ca2_need = int(detail.TD.get(ShiftCode.CA2, 0))
         if td_ca2_need > 0:
             cc = ChoiceCtx(d=d, code="CA2", locked_today=locked_today, used=used, ctx=ctx)
             ids = fill_ranked_slots(need=td_ca2_need,
@@ -135,3 +153,4 @@ def run_phase_day(ctx: Context, first: date, last: date):
         _log(ctx, f"summary {d.isoformat()} | TD: K={td_k} CA1={td_ca1} CA2={td_ca2} | PGD: K={pgd_k} CA2={pgd_ca2}")
 
         d += timedelta(days=1)
+
