@@ -15,6 +15,7 @@ from scheduler.repo import load_staff, load_locked, load_fixed, load_holidays
 from datetime import date, timedelta
 from rules import get_profile
 from scheduler.utils import ymd, month_last_day, day_kind
+from scheduler.validate import validate_month
 
 # Trỏ tới thư mục build của frontend (Vite) nếu đã build
 FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
@@ -286,6 +287,17 @@ def rule_expected():
         d = d + timedelta(days=1)
 
     return jsonify({"ok": True, "perDayExpected": out})
+
+
+@app.get("/api/schedule/validate")
+def schedule_validate():
+    today = date.today()
+    y = request.args.get("year", type=int) or today.year
+    m = request.args.get("month", type=int) or today.month
+    if m < 1 or m > 12:
+        return jsonify({"ok": False, "error": "month must be 1..12"}), 400
+    body = validate_month(y, m)
+    return jsonify(body)
 
 @app.post("/api/schedule/generate")
 def gen():

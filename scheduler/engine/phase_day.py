@@ -18,6 +18,8 @@ def run_phase_day(ctx: Context, first: date, last: date):
     d = first
     while d <= last:
         locked_today: Set[int] = ctx.locked.get(d, set())
+        for sid in sorted(locked_today):
+            _log(ctx, f"{d.isoformat()} SKIP (locked) #{sid}")
 
         # used = mọi người đã được đặt TRONG NGÀY d (vd. Đêm đã đặt trước đó)
         pre_used = {p.staff_id for p in ctx._planned if p.day == d}
@@ -27,14 +29,17 @@ def run_phase_day(ctx: Context, first: date, last: date):
 
         # ============ 1) fixed trước (nếu có) ============
         for r in ctx.fixed.get(d, []):
-            if r.staff_id in used or r.staff_id in locked_today:
+            pos = getattr(r, "position", "TD") or "TD"
+            if r.staff_id in locked_today:
+                _log(ctx, f"{d.isoformat()} SKIP (locked) #{r.staff_id}")
+                continue
+            if r.staff_id in used:
                 continue
             if not ctx.can_take(r.staff_id, r.shift_code):
                 continue
-            # fixed luôn tại TD (yêu cầu cũ), nếu cần có PGD thì backend sẽ seed
-            ctx.do_place(d, r.staff_id, r.shift_code, "TD")
+            ctx.do_place(d, r.staff_id, r.shift_code, pos)
             used.add(r.staff_id)
-            _log(ctx, f"{d.isoformat()} FIXED {r.shift_code}@TD -> #{r.staff_id}")
+            _log(ctx, f"{d.isoformat()} FIXED {r.shift_code}@{pos} -> #{r.staff_id}")
 
         # Đếm số lượng đã được phân ca trước khi dispatch thêm
         td_k_filled = pgd_k_filled = pgd_ca2_filled = td_ca1_filled = td_ca2_filled = 0
