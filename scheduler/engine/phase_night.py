@@ -43,13 +43,35 @@ def run_phase_night(ctx: Context, first: date, last: date) -> List[date]:
 
     d = first
     while d <= last:
-        used: Set[int] = set()
+        used: Set[int] = {p.staff_id for p in ctx._planned if p.day == d}
         locked_today = ctx.locked.get(d, set())
+        for sid in sorted(locked_today):
+            _log(ctx, f"{d.isoformat()} SKIP (locked) #{sid}")
         detail = ctx.profile.expected_night_counts(kind=day_kind(d, ctx.holidays))
 
         # Tổng nhu cầu Đ theo rule
         td_total = _get_total(detail, "TD")
         pgd_total = _get_total(detail, "PGD")
+
+        # Fixed assignments for night
+        for r in ctx.fixed.get(d, []):
+            if r.shift_code != "Đ":
+                continue
+            pos = getattr(r, "position", "TD") or "TD"
+            if r.staff_id in locked_today:
+                _log(ctx, f"{d.isoformat()} SKIP (locked) #{r.staff_id}")
+                continue
+            if r.staff_id in used:
+                continue
+            if not ctx.can_take(r.staff_id, "Đ"):
+                continue
+            ctx.do_place(d, r.staff_id, "Đ", pos)
+            used.add(r.staff_id)
+            if pos == "TD":
+                td_total = max(td_total - 1, 0)
+            elif pos == "PGD":
+                pgd_total = max(pgd_total - 1, 0)
+            _log(ctx, f"{d.isoformat()} FIXED Đ@{pos} -> #{r.staff_id}")
 
         # jitter hàng đợi mỗi ngày (nếu bật)
         if RAND_CFG.get("daily_jitter"):

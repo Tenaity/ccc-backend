@@ -29,6 +29,7 @@ class FixedAssignment(Base):
     staff_id: Mapped[int] = mapped_column(ForeignKey("staff.id", ondelete="CASCADE"))
     day: Mapped[date] = mapped_column(Date, nullable=False)
     shift_code: Mapped[str] = mapped_column(String, nullable=False)  # CA1 | CA2 | K | HC | Đ
+    position: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # TD | PGD
     staff: Mapped[Staff] = relationship(back_populates="fixed_assignments")
 
 class OffDay(Base):

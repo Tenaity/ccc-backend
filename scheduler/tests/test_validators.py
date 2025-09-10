@@ -1,15 +1,14 @@
 from datetime import date
+from types import SimpleNamespace
 from scheduler.validators import validate_one_day_leader
 
 def test_validate_one_day_leader_exactly_one():
     first = date(2025,8,1); last = date(2025,8,3)
     planned = [
-        # day 1: 1 leader
-        {"day": date(2025,8,1), "staff_id":1, "shift_code":"K", "position":"TD"},
+        SimpleNamespace(day=date(2025,8,1), staff_id=1, shift_code="K", position="TD"),
         # day 2: 0 leader
-        # day 3: 2 leaders
-        {"day": date(2025,8,3), "staff_id":2, "shift_code":"K", "position":"TD"},
-        {"day": date(2025,8,3), "staff_id":3, "shift_code":"K", "position":"TD"},
+        SimpleNamespace(day=date(2025,8,3), staff_id=2, shift_code="K", position="TD"),
+        SimpleNamespace(day=date(2025,8,3), staff_id=3, shift_code="K", position="TD"),
     ]
     bad = validate_one_day_leader(planned, first, last)
     # ngày 2 và 3 phải bị bắt
