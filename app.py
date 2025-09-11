@@ -120,6 +120,169 @@ def del_staff(staff_id: int):
         return {"ok": True}
 
 
+@app.get("/api/fixed")
+def list_fixed_assignments():
+    """List fixed assignments for a given month."""
+    today = date.today()
+    y = request.args.get("year", type=int) or today.year
+    m = request.args.get("month", type=int) or today.month
+
+    if m < 1 or m > 12:
+        return {"error": "month must be 1..12"}, 400
+
+    last_day = calendar.monthrange(y, m)[1]
+    start = date(y, m, 1)
+    end = date(y, m, last_day)
+
+    try:
+        with SessionLocal() as s:
+            rows = (
+                s.query(FixedAssignment, Staff)
+                .join(Staff, FixedAssignment.staff_id == Staff.id)
+                .filter(FixedAssignment.day.between(start, end))
+                .all()
+            )
+            out = [
+                {
+                    "id": fa.id,
+                    "staff_id": fa.staff_id,
+                    "staff_name": st.full_name,
+                    "day": fa.day.isoformat(),
+                    "shift_code": fa.shift_code,
+                    "position": fa.position,
+                }
+                for fa, st in rows
+            ]
+            return jsonify(out)
+    except Exception as e:
+        return (
+            jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}),
+            500,
+        )
+
+
+@app.post("/api/fixed")
+def create_fixed_assignment():
+    data = request.get_json(force=True) or {}
+    staff_id = data.get("staff_id")
+    day_str = data.get("day")
+    shift_code = data.get("shift_code")
+    position = data.get("position")
+
+    if staff_id is None or day_str is None or shift_code is None:
+        return {"error": "staff_id, day, shift_code required"}, 400
+
+    try:
+        staff_id = int(staff_id)
+    except Exception:
+        return {"error": "staff_id must be int"}, 400
+
+    try:
+        d = date.fromisoformat(day_str)
+    except Exception:
+        return {"error": "day must be YYYY-MM-DD"}, 400
+
+    try:
+        with SessionLocal() as s:
+            staff = s.get(Staff, staff_id)
+            if not staff:
+                return {"error": "Staff not found"}, 404
+
+            fa = FixedAssignment(
+                staff_id=staff_id,
+                day=d,
+                shift_code=shift_code,
+                position=position,
+            )
+            s.add(fa)
+            s.commit()
+            item = {
+                "id": fa.id,
+                "staff_id": fa.staff_id,
+                "staff_name": staff.full_name,
+                "day": fa.day.isoformat(),
+                "shift_code": fa.shift_code,
+                "position": fa.position,
+            }
+            return {"ok": True, "item": item}, 201
+    except Exception as e:
+        return (
+            jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}),
+            500,
+        )
+
+
+@app.put("/api/fixed/<int:fix_id>")
+def update_fixed_assignment(fix_id: int):
+    data = request.get_json(force=True) or {}
+    staff_id = data.get("staff_id")
+    day_str = data.get("day")
+    shift_code = data.get("shift_code")
+    position = data.get("position")
+
+    try:
+        with SessionLocal() as s:
+            fa = s.get(FixedAssignment, fix_id)
+            if not fa:
+                return {"error": "Not found"}, 404
+
+            if staff_id is not None:
+                try:
+                    staff_id = int(staff_id)
+                except Exception:
+                    return {"error": "staff_id must be int"}, 400
+                staff = s.get(Staff, staff_id)
+                if not staff:
+                    return {"error": "Staff not found"}, 404
+                fa.staff_id = staff_id
+            else:
+                staff = fa.staff
+
+            if day_str is not None:
+                try:
+                    fa.day = date.fromisoformat(day_str)
+                except Exception:
+                    return {"error": "day must be YYYY-MM-DD"}, 400
+
+            if shift_code is not None:
+                fa.shift_code = shift_code
+            if position is not None:
+                fa.position = position
+
+            s.commit()
+            item = {
+                "id": fa.id,
+                "staff_id": fa.staff_id,
+                "staff_name": staff.full_name if staff else None,
+                "day": fa.day.isoformat(),
+                "shift_code": fa.shift_code,
+                "position": fa.position,
+            }
+            return {"ok": True, "item": item}
+    except Exception as e:
+        return (
+            jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}),
+            500,
+        )
+
+
+@app.delete("/api/fixed/<int:fix_id>")
+def delete_fixed_assignment(fix_id: int):
+    try:
+        with SessionLocal() as s:
+            fa = s.get(FixedAssignment, fix_id)
+            if not fa:
+                return {"error": "Not found"}, 404
+            s.delete(fa)
+            s.commit()
+            return {"ok": True}
+    except Exception as e:
+        return (
+            jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}),
+            500,
+        )
+
+
 @app.get("/api/off")
 def list_off_days():
     """List off days for a given month (defaults to current)."""
@@ -224,6 +387,22 @@ def delete_off_day(off_id: int):
             jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}),
             500,
         )
+
+
+# Backwards‑compat aliases for old /api/offdays routes
+@app.get("/api/offdays")
+def list_off_days_alias():
+    return list_off_days()
+
+
+@app.post("/api/offdays")
+def create_off_day_alias():
+    return create_off_day()
+
+
+@app.delete("/api/offdays/<int:off_id>")
+def delete_off_day_alias(off_id: int):
+    return delete_off_day(off_id)
 
 @app.get("/api/assignments")
 def list_assignments():
