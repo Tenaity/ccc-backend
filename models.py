@@ -1,9 +1,23 @@
 # backend/models.py
 from datetime import date
 from typing import Optional, List
-from sqlalchemy import create_engine, Integer, String, Boolean, Date, ForeignKey, Float
-from sqlalchemy.orm import declarative_base, mapped_column, Mapped, relationship, sessionmaker
-from sqlalchemy import Column, Integer, String, Date, Boolean
+from sqlalchemy import (
+    create_engine,
+    Integer,
+    String,
+    Boolean,
+    Date,
+    ForeignKey,
+    Float,
+    Column,
+)
+from sqlalchemy.orm import (
+    declarative_base,
+    mapped_column,
+    Mapped,
+    relationship,
+    sessionmaker,
+)
 import os
 
 DB_URL = os.getenv("DB_URL", "sqlite:///./cskh.db")
@@ -56,4 +70,21 @@ class Holiday(Base):
     name = Column(String, nullable=True)
 
 def init_db():
+    """Create tables and migrate legacy databases.
+
+    SQLite does not support ``ALTER TABLE`` in ``create_all``. Existing
+    deployments may therefore miss newly added columns. This helper creates
+    tables for fresh databases and, for pre-existing ones, ensures the
+    ``fixed_assignment`` table contains the ``position`` column.
+    """
     Base.metadata.create_all(engine)
+
+    # --- Migration: add ``position`` column if missing ---
+    with engine.connect() as conn:
+        res = conn.exec_driver_sql("PRAGMA table_info('fixed_assignment')").fetchall()
+        cols = {row[1] for row in res}
+        if "position" not in cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE fixed_assignment ADD COLUMN position VARCHAR NULL"
+            )
+        conn.commit()
