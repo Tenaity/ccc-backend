@@ -17,6 +17,11 @@ from rules import get_profile
 from scheduler.utils import ymd, month_last_day, day_kind
 from scheduler.validate import validate_month
 
+import csv
+import io
+import json
+from flask import Response, stream_with_context
+
 # Trỏ tới thư mục build của frontend (Vite) nếu đã build
 FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 DB_FILE = pathlib.Path(os.path.join(os.path.dirname(__file__), "cskh.db"))
@@ -245,6 +250,63 @@ def list_assignments():
             }
             for r in rows
         ])
+
+
+@app.get("/api/export_audit")
+def export_audit():
+    """Xuất danh sách phân ca kèm JSON metadata ra CSV để audit.
+
+    Sử dụng ``csv.writer`` để đảm bảo trích dẫn đúng các ký tự đặc biệt
+    trong cột JSON. Dữ liệu được stream từng hàng thông qua ``io.StringIO``
+    nhằm tránh giữ toàn bộ nội dung trong bộ nhớ.
+    """
+    today = date.today()
+    y = request.args.get("year", type=int) or today.year
+    m = request.args.get("month", type=int) or today.month
+
+    if m < 1 or m > 12:
+        return {"error": "month must be 1..12"}, 400
+
+    last_day = calendar.monthrange(y, m)[1]
+    start = date(y, m, 1)
+    end = date(y, m, last_day)
+
+    with SessionLocal() as s:
+        rows = (
+            s.query(Assignment)
+            .filter(Assignment.day.between(start, end))
+            .all()
+        )
+
+    def generate():
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["day", "shift_code", "staff_id", "meta"])
+        yield buf.getvalue()
+        buf.seek(0)
+        buf.truncate(0)
+        for r in rows:
+            # JSON chứa nhiều key, bao gồm chuỗi có dấu phẩy để kiểm tra quoting
+            meta = {
+                "info": f"{r.shift_code},{r.staff_id}",
+                "extra": "value",
+            }
+            writer.writerow(
+                [
+                    r.day.isoformat(),
+                    r.shift_code,
+                    r.staff_id,
+                    json.dumps(meta, ensure_ascii=False),
+                ]
+            )
+            yield buf.getvalue()
+            buf.seek(0)
+            buf.truncate(0)
+
+    headers = {
+        "Content-Disposition": f"attachment; filename=audit-{y:04d}-{m:02d}.csv"
+    }
+    return Response(stream_with_context(generate()), mimetype="text/csv", headers=headers)
     
 @app.get("/api/rules/expected")
 def rule_expected():
