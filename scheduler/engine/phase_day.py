@@ -73,6 +73,15 @@ def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
             placed_leader = False
             tried = set()
 
+            existing_leader = next(
+                (
+                    p.staff_id
+                    for p in ctx._planned
+                    if p.day == d and p.shift_code == ShiftCode.K and p.position == "TD"
+                ),
+                None,
+            )
+
             # đi theo thứ tự trong deque; ai không đạt quota thì thử người tiếp theo
             # khi chọn được, đẩy người đó xuống cuối deque để fair vòng sau
             for cand in list(ctx.q_tc_day):
@@ -81,6 +90,13 @@ def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
                 tried.add(cand.id)
                 if cand.id in used or cand.id in locked_today:
                     continue
+                if existing_leader is not None:
+                    day_log(
+                        ctx,
+                        f"LEADER_DUP {d.isoformat()} existing=#{existing_leader} try=#{cand.id}",
+                    )
+                    placed_leader = True
+                    break
                 if ctx.can_take(cand.id, "K"):
                     ctx.do_place(d, cand.id, "K", "TD")
                     used.add(cand.id)
@@ -92,7 +108,10 @@ def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
                     if len(ctx.q_tc_day) and ctx.q_tc_day[0].id == cand.id:
                         ctx.q_tc_day.rotate(-1)
 
-                    day_log(ctx, f"{d.isoformat()} TD.K leader -> TC#{cand.id} | TC queue(after)={[x.id for x in ctx.q_tc_day]}")
+                    day_log(
+                        ctx,
+                        f"{d.isoformat()} TD.K leader -> TC#{cand.id} | TC queue(after)={[x.id for x in ctx.q_tc_day]}",
+                    )
                     break
 
             if placed_leader:
