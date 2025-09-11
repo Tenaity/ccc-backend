@@ -18,9 +18,6 @@ def _fairness(ctx):
 
 def test_single_leader_per_night(session, capsys):
     ctx, _, _ = build_ctx(2025, 1, seed=1, save=False)
-    from collections import deque
-    # remove TC from GDV1 queue to model expected behaviour
-    ctx.q_gdv1 = deque([x for x in ctx.q_gdv1 if getattr(x, "role", "") != "TC"])
     d = date(2025, 1, 2)
     miss = run_phase_night(ctx, d, d, _fairness(ctx))
     assert miss == []
@@ -32,7 +29,6 @@ def test_single_leader_per_night(session, capsys):
     assert re.search(rf"summary {d.isoformat()} \| leader=\d+ \| TD.D=", out)
 
 
-@pytest.mark.xfail(reason="known bug: TC reused as non-leader", strict=True)
 def test_no_double_night_leader(session):
     d = date(2025, 1, 3)
     for gid in range(3, 9):
@@ -43,7 +39,7 @@ def test_no_double_night_leader(session):
     assigns = [p for p in ctx._planned if p.day == d]
     staff_map = {s.id: s for s in ctx.TC + ctx.GDV1 + ctx.GDV2}
     tc_leaders = [a for a in assigns if a.shift_code == "Đ" and a.position == "TD" and staff_map[a.staff_id].role == "TC"]
-    assert len(tc_leaders) == 1  # fails: two TC assigned
+    assert len(tc_leaders) == 1
 
 
 def test_night_miss_without_tc(session):
