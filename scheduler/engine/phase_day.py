@@ -8,10 +8,7 @@ from rules.types import ShiftCode
 from .core import Context
 from scheduler.utils import day_kind
 from .utils_rank import ChoiceCtx, fill_ranked_slots, budget_for_day, FairnessWindow
-
-
-def _log(_: Context, msg: str):
-    print(f"[DAY ] {msg}")
+from .logging import day_log
 
 
 def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
@@ -20,7 +17,7 @@ def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
         fair.new_day(d)
         locked_today: Set[int] = ctx.locked.get(d, set())
         for sid in sorted(locked_today):
-            _log(ctx, f"{d.isoformat()} SKIP (locked) #{sid}")
+            day_log(ctx, f"{d.isoformat()} SKIP (locked) #{sid}")
 
         # used = mọi người đã được đặt TRONG NGÀY d (vd. Đêm đã đặt trước đó)
         pre_used = {p.staff_id for p in ctx._planned if p.day == d}
@@ -32,7 +29,7 @@ def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
         for r in ctx.fixed.get(d, []):
             pos = getattr(r, "position", "TD") or "TD"
             if r.staff_id in locked_today:
-                _log(ctx, f"{d.isoformat()} SKIP (locked) #{r.staff_id}")
+                day_log(ctx, f"{d.isoformat()} SKIP (locked) #{r.staff_id}")
                 continue
             if r.staff_id in used:
                 continue
@@ -40,7 +37,7 @@ def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
                 continue
             ctx.do_place(d, r.staff_id, r.shift_code, pos)
             used.add(r.staff_id)
-            _log(ctx, f"{d.isoformat()} FIXED {r.shift_code}@{pos} -> #{r.staff_id}")
+            day_log(ctx, f"{d.isoformat()} FIXED {r.shift_code}@{pos} -> #{r.staff_id}")
 
         # Đếm số lượng đã được phân ca trước khi dispatch thêm
         td_k_filled = pgd_k_filled = pgd_ca2_filled = td_ca1_filled = td_ca2_filled = 0
@@ -71,7 +68,7 @@ def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
             pool_tc = [x for x in list(ctx.q_tc_day)
                        if x.id not in used and x.id not in locked_today]
 
-            _log(ctx, f"{d.isoformat()} TD.K need={k_td_need} | TC pool(before)={pool_ids_before} | usable={[x.id for x in pool_tc]}")
+            day_log(ctx, f"{d.isoformat()} TD.K need={k_td_need} | TC pool(before)={pool_ids_before} | usable={[x.id for x in pool_tc]}")
 
             placed_leader = False
             tried = set()
@@ -95,13 +92,13 @@ def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
                     if len(ctx.q_tc_day) and ctx.q_tc_day[0].id == cand.id:
                         ctx.q_tc_day.rotate(-1)
 
-                    _log(ctx, f"{d.isoformat()} TD.K leader -> TC#{cand.id} | TC queue(after)={[x.id for x in ctx.q_tc_day]}")
+                    day_log(ctx, f"{d.isoformat()} TD.K leader -> TC#{cand.id} | TC queue(after)={[x.id for x in ctx.q_tc_day]}")
                     break
 
             if placed_leader:
                 k_td_need = max(k_td_need - 1, 0)
             else:
-                _log(ctx, f"{d.isoformat()} TD.K leader MISS (usable={ [x.id for x in pool_tc] })")
+                day_log(ctx, f"{d.isoformat()} TD.K leader MISS (usable={ [x.id for x in pool_tc] })")
 
         # ============ 3) TD · CA1 ============
         if td_ca1_need > 0:
@@ -116,7 +113,7 @@ def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
                                     want=budget)
             for sid in ids:
                 ctx.do_place(d, sid, "CA1", "TD")
-                _log(ctx, f"{d.isoformat()} TD.CA1 -> #{sid}")
+                day_log(ctx, f"{d.isoformat()} TD.CA1 -> #{sid}")
             got1, got2 = fair.today_for("CA1", "TD")
             win1, win2 = fair.summary("CA1", "TD")
             print(f"[FAIR] {d.isoformat()} TD.CA1 want r1={budget[1]} r2={budget[2]} | got r1={got1} r2={got2} | window7 r1={win1} r2={win2}")
@@ -134,7 +131,7 @@ def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
                                     want=budget)
             for sid in ids:
                 ctx.do_place(d, sid, "CA2", "TD")
-                _log(ctx, f"{d.isoformat()} TD.CA2 -> #{sid}")
+                day_log(ctx, f"{d.isoformat()} TD.CA2 -> #{sid}")
             got1, got2 = fair.today_for("CA2", "TD")
             win1, win2 = fair.summary("CA2", "TD")
             print(f"[FAIR] {d.isoformat()} TD.CA2 want r1={budget[1]} r2={budget[2]} | got r1={got1} r2={got2} | window7 r1={win1} r2={win2}")
@@ -152,7 +149,7 @@ def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
                                     want=budget)
             for sid in ids:
                 ctx.do_place(d, sid, "K", "PGD")
-                _log(ctx, f"{d.isoformat()} PGD.K -> #{sid}")
+                day_log(ctx, f"{d.isoformat()} PGD.K -> #{sid}")
             got1, got2 = fair.today_for("K", "PGD")
             win1, win2 = fair.summary("K", "PGD")
             print(f"[FAIR] {d.isoformat()} PGD.K want r1={budget[1]} r2={budget[2]} | got r1={got1} r2={got2} | window7 r1={win1} r2={win2}")
@@ -170,7 +167,7 @@ def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
                                     want=budget)
             for sid in ids:
                 ctx.do_place(d, sid, "CA2", "PGD")
-                _log(ctx, f"{d.isoformat()} PGD.CA2 -> #{sid}")
+                day_log(ctx, f"{d.isoformat()} PGD.CA2 -> #{sid}")
             got1, got2 = fair.today_for("CA2", "PGD")
             win1, win2 = fair.summary("CA2", "PGD")
             print(f"[FAIR] {d.isoformat()} PGD.CA2 want r1={budget[1]} r2={budget[2]} | got r1={got1} r2={got2} | window7 r1={win1} r2={win2}")
@@ -184,7 +181,7 @@ def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
         td_ca2 = int(detail.TD.get(ShiftCode.CA2, 0))
         pgd_k = int(detail.PGD.get(ShiftCode.K, 0))
         pgd_ca2 = int(detail.PGD.get(ShiftCode.CA2, 0))
-        _log(ctx, f"summary {d.isoformat()} | TD: K={td_k} CA1={td_ca1} CA2={td_ca2} | PGD: K={pgd_k} CA2={pgd_ca2}")
+        day_log(ctx, f"summary {d.isoformat()} | TD: K={td_k} CA1={td_ca1} CA2={td_ca2} | PGD: K={pgd_k} CA2={pgd_ca2}")
 
         d += timedelta(days=1)
 

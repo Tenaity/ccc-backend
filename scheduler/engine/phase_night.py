@@ -8,13 +8,10 @@ from .core import Context
 from .utils_rank import ChoiceCtx, fill_ranked_slots, budget_for_day, FairnessWindow  # dùng bản trong engine/
 from scheduler.utils import day_kind
 from scheduler.randomize import CFG as RAND_CFG
+from .logging import night_log
 
 # Cho phép “cứu cháy” leader đêm: bỏ rào trần công nếu cần thiết
 ALLOW_OVERCAP_NIGHT_LEADER = True
-
-
-def _log(_: Context, msg: str):
-    print(f"[NIGHT] {msg}")
 
 
 def _get_total(night_detail: dict, place_key: str) -> int:
@@ -47,7 +44,7 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
         used: Set[int] = {p.staff_id for p in ctx._planned if p.day == d}
         locked_today = ctx.locked.get(d, set())
         for sid in sorted(locked_today):
-            _log(ctx, f"{d.isoformat()} SKIP (locked) #{sid}")
+            night_log(ctx, f"{d.isoformat()} SKIP (locked) #{sid}")
         detail = ctx.profile.expected_night_counts(kind=day_kind(d, ctx.holidays))
 
         # Tổng nhu cầu Đ theo rule
@@ -72,7 +69,7 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
                 td_total = max(td_total - 1, 0)
             elif pos == "PGD":
                 pgd_total = max(pgd_total - 1, 0)
-            _log(ctx, f"{d.isoformat()} FIXED Đ@{pos} -> #{r.staff_id}")
+            night_log(ctx, f"{d.isoformat()} FIXED Đ@{pos} -> #{r.staff_id}")
 
         # jitter hàng đợi mỗi ngày (nếu bật)
         if RAND_CFG.get("daily_jitter"):
@@ -83,7 +80,7 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
             if len(ctx.q_gdv2):
                 ctx.q_gdv2.rotate(ctx.rng.randrange(len(ctx.q_gdv2)))
 
-        _log(ctx, f"{d.isoformat()} | need TD.D={td_total} PGD.D={pgd_total} | locked={sorted(locked_today)}")
+        night_log(ctx, f"{d.isoformat()} | need TD.D={td_total} PGD.D={pgd_total} | locked={sorted(locked_today)}")
 
         # ===== 1) Leader Đ @ TD (từ TC) =====
         placed_leader = False
@@ -93,7 +90,7 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
                 x for x in list(ctx.q_tc_night)
                 if x.id not in used and x.id not in locked_today and getattr(x, "can_night", True)
             ]
-            _log(ctx, f"  leader pool0={[x.id for x in pool0]}")
+            night_log(ctx, f"  leader pool0={[x.id for x in pool0]}")
 
             # Tầng 1: strict can_take
             tried: Set[int] = set()
@@ -110,7 +107,7 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
                     ctx.locked.setdefault(d + timedelta(days=1), set()).add(cand.id)
                     placed_leader = True
                     leader_id = cand.id
-                    _log(ctx, f"  leader placed=TC#{cand.id} (strict)")
+                    night_log(ctx, f"  leader placed=TC#{cand.id} (strict)")
                     break
 
             # Tầng 2: last resort (bỏ quota)
@@ -129,17 +126,17 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
                     ctx.locked.setdefault(d + timedelta(days=1), set()).add(cand.id)
                     placed_leader = True
                     leader_id = cand.id
-                    _log(ctx, f"  leader OVERCAP=TC#{cand.id}")
+                    night_log(ctx, f"  leader OVERCAP=TC#{cand.id}")
                     break
 
             if not placed_leader:
-                _log(ctx, "  MISS leader (không đặt được TC cho Đ@TD)")
+                night_log(ctx, "  MISS leader (không đặt được TC cho Đ@TD)")
                 night_miss.append(d)
 
         # ===== 2) Đ @ TD (non‑leader) =====
         td_remain = max(td_total - (1 if placed_leader else 0), 0)
         if td_remain > 0:
-            _log(ctx, f"  TD.D remaining={td_remain} (after leader)")
+            night_log(ctx, f"  TD.D remaining={td_remain} (after leader)")
             budget = budget_for_day(d, "TD.Đ", td_remain)
             cc = ChoiceCtx(d=d, code="Đ", locked_today=locked_today, ctx=ctx, used=used)
 
@@ -159,7 +156,7 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
             # fallback TC nếu còn thiếu
             remain = td_remain - placed
             if remain > 0:
-                _log(ctx, f"  TD.D fallback TC remain={remain}")
+                night_log(ctx, f"  TD.D fallback TC remain={remain}")
                 pool_tc = [
                     x for x in list(ctx.q_tc_night)
                     if x.id not in used and x.id not in locked_today and getattr(x, "can_night", True)
@@ -174,7 +171,7 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
                         placed += 1
                         remain -= 1
                 if remain > 0:
-                    _log(ctx, f"  TD.D short={remain}")
+                    night_log(ctx, f"  TD.D short={remain}")
 
             got1, got2 = fair.today_for("Đ", "TD")
             win1, win2 = fair.summary("Đ", "TD")
@@ -182,7 +179,7 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
 
         # ===== 3) Đ @ PGD =====
         if pgd_total > 0:
-            _log(ctx, f"  PGD.D need={pgd_total}")
+            night_log(ctx, f"  PGD.D need={pgd_total}")
             budget = budget_for_day(d, "PGD.Đ", pgd_total)
             cc = ChoiceCtx(d=d, code="Đ", locked_today=locked_today, ctx=ctx, used=used)
             pool_top1 = [x for x in list(ctx.q_gdv1) if x.id not in used and getattr(x, "can_night", True)]
@@ -214,14 +211,14 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
                         placed += 1
                         remain -= 1
                 if remain > 0:
-                    _log(ctx, f"  PGD.D short={remain}")
+                    night_log(ctx, f"  PGD.D short={remain}")
 
             got1, got2 = fair.today_for("Đ", "PGD")
             win1, win2 = fair.summary("Đ", "PGD")
             print(f"[FAIR] {d.isoformat()} PGD.Đ want r1={budget[1]} r2={budget[2]} | got r1={got1} r2={got2} | window7 r1={win1} r2={win2}")
 
         # ===== summary ngày
-        _log(ctx, f"summary {d.isoformat()} | leader={leader_id if placed_leader else '-'} | TD.D={td_total} | PGD.D={pgd_total}")
+        night_log(ctx, f"summary {d.isoformat()} | leader={leader_id if placed_leader else '-'} | TD.D={td_total} | PGD.D={pgd_total}")
 
         if ctx.save:
             ctx.session.commit()
