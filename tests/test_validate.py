@@ -29,8 +29,7 @@ def test_offday_vs_fixed_conflict(fresh_db):
         s.commit()
     res = validate.validate_month(2025, 9)
     assert not res["ok"]
-    types = {c["type"] for c in res["conflicts"]}
-    assert "OFFDAY_VS_FIXED" in types
+    assert res["conflicts"].get("offday_vs_fixed")
 
 
 def test_double_fixed_conflict(fresh_db):
@@ -41,8 +40,7 @@ def test_double_fixed_conflict(fresh_db):
         s.add(models.FixedAssignment(staff_id=1, day=date(2025, 9, 5), shift_code="K", position="PGD"))
         s.commit()
     res = validate.validate_month(2025, 9)
-    types = {c["type"] for c in res["conflicts"]}
-    assert "DOUBLE_FIXED" in types
+    assert res["conflicts"].get("double_fixed")
 
 
 def test_over_capacity_conflict(fresh_db):
@@ -54,9 +52,8 @@ def test_over_capacity_conflict(fresh_db):
             s.add(models.FixedAssignment(staff_id=i, day=day, shift_code="K", position="PGD"))
         s.commit()
     res = validate.validate_month(2025, 9)
-    conflict = next((c for c in res["conflicts"] if c["type"] == "OVER_CAPACITY"), None)
-    assert conflict is not None
-    assert conflict["position"] == "PGD"
-    assert conflict["shift_code"] == "K"
-    assert conflict["fixed"] == 3
-    assert conflict["expected"] < 3
+    conflict = res["conflicts"].get("over_capacity")
+    assert conflict and conflict[0]["position"] == "PGD"
+    assert conflict[0]["shift_code"] == "K"
+    assert conflict[0]["fixed"] == 3
+    assert conflict[0]["expected"] < 3

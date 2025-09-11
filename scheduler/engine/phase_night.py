@@ -37,6 +37,9 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
     Trả về: danh sách ngày thiếu leader đêm.
     """
     night_miss: List[date] = []
+    tc_ids = {getattr(st, "id") for st in getattr(ctx, "TC", [])}
+    if not tc_ids:
+        tc_ids = {st.id for st in ctx.q_tc_night}
 
     d = first
     while d <= last:
@@ -94,10 +97,23 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
         # ===== 1) Leader Đ @ TD (từ TC) =====
         if not placed_leader and td_total > 0:
             pool0 = [
-                x for x in list(ctx.q_tc_night)
+                x
+                for x in list(ctx.q_tc_night)
                 if x.id not in used and x.id not in locked_today and getattr(x, "can_night", True)
             ]
             night_log(ctx, f"  leader pool0={[x.id for x in pool0]}")
+
+            existing_leader = next(
+                (
+                    p.staff_id
+                    for p in ctx._planned
+                    if p.day == d
+                    and p.shift_code == "Đ"
+                    and p.position == "TD"
+                    and p.staff_id in tc_ids
+                ),
+                None,
+            )
 
             # Tầng 1: strict can_take
             tried: Set[int] = set()
@@ -108,6 +124,14 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
                 if cand.id in tried:
                     break
                 tried.add(cand.id)
+                if existing_leader is not None:
+                    night_log(
+                        ctx,
+                        f"LEADER_DUP {d.isoformat()} existing=#{existing_leader} try=#{cand.id}",
+                    )
+                    placed_leader = True
+                    leader_id = existing_leader
+                    break
                 if ctx.can_take(cand.id, "Đ"):
                     ctx.do_place(d, cand.id, "Đ", "TD")
                     used.add(cand.id)
@@ -127,6 +151,14 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
                     if cand.id in tried:
                         break
                     tried.add(cand.id)
+                    if existing_leader is not None:
+                        night_log(
+                            ctx,
+                            f"LEADER_DUP {d.isoformat()} existing=#{existing_leader} try=#{cand.id}",
+                        )
+                        placed_leader = True
+                        leader_id = existing_leader
+                        break
                     # không check can_take
                     ctx.do_place(d, cand.id, "Đ", "TD")
                     used.add(cand.id)

@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, timedelta
-from typing import Dict, List
+from typing import DefaultDict, Dict, List
 
-from models import SessionLocal, FixedAssignment, OffDay
+from models import SessionLocal, FixedAssignment, OffDay, Assignment, Staff
 from scheduler.repo import load_holidays
 from scheduler.utils import ymd, month_last_day, day_kind
 from rules import get_profile
@@ -14,13 +14,12 @@ from rules import get_profile
 def validate_month(year: int, month: int) -> Dict[str, object]:
     """Validate fixed assignments against off days and rule capacity.
 
-    Returns a dict with ``ok`` flag and a list of ``conflicts`` describing
-    issues. Each conflict is a mapping containing ``day`` (YYYY-MM-DD) and
-    extra details depending on the type.
+    Returns a dict with ``ok`` flag and grouped ``conflicts`` describing
+    issues. Keys in ``conflicts`` denote conflict type.
     """
     first = ymd(year, month, 1)
     last = ymd(year, month, month_last_day(year, month))
-    conflicts: List[Dict[str, object]] = []
+    conflicts: DefaultDict[str, List[Dict[str, object]]] = defaultdict(list)
 
     with SessionLocal() as s:
         fixed_rows = (
@@ -33,6 +32,18 @@ def validate_month(year: int, month: int) -> Dict[str, object]:
             .filter(OffDay.day.between(first, last))
             .all()
         )
+        assign_rows = (
+            s.query(
+                Assignment.day,
+                Assignment.staff_id,
+                Assignment.shift_code,
+                Assignment.position,
+                Staff.role,
+            )
+            .join(Staff, Assignment.staff_id == Staff.id, isouter=True)
+            .filter(Assignment.day.between(first, last))
+            .all()
+        )
         holidays = load_holidays(s)
 
     off_by_day_staff = {(r.day, r.staff_id) for r in off_rows}
@@ -40,10 +51,9 @@ def validate_month(year: int, month: int) -> Dict[str, object]:
     for r in fixed_rows:
         fixed_by_day[r.day].append(r)
         if (r.day, r.staff_id) in off_by_day_staff:
-            conflicts.append(
+            conflicts["offday_vs_fixed"].append(
                 {
                     "day": r.day.isoformat(),
-                    "type": "OFFDAY_VS_FIXED",
                     "staff_id": r.staff_id,
                     "shift_code": r.shift_code,
                     "position": getattr(r, "position", None),
@@ -56,10 +66,9 @@ def validate_month(year: int, month: int) -> Dict[str, object]:
             by_staff[r.staff_id].append(r)
         for sid, lst in by_staff.items():
             if len(lst) > 1:
-                conflicts.append(
+                conflicts["double_fixed"].append(
                     {
                         "day": day.isoformat(),
-                        "type": "DOUBLE_FIXED",
                         "staff_id": sid,
                         "shift_codes": [x.shift_code for x in lst],
                     }
@@ -78,10 +87,9 @@ def validate_month(year: int, month: int) -> Dict[str, object]:
             bucket[pos][code] += 1
             expected_map = exp_day if code != "Đ" else exp_night
             if int(expected_map.get(pos, {}).get(code, 0)) == 0:
-                conflicts.append(
+                conflicts["invalid_position"].append(
                     {
                         "day": d.isoformat(),
-                        "type": "INVALID_POSITION",
                         "staff_id": r.staff_id,
                         "shift_code": code,
                         "position": pos,
@@ -92,10 +100,9 @@ def validate_month(year: int, month: int) -> Dict[str, object]:
                 expected_map = exp_day if code != "Đ" else exp_night
                 exp = int(expected_map.get(pos, {}).get(code, 0))
                 if cnt > exp:
-                    conflicts.append(
+                    conflicts["over_capacity"].append(
                         {
                             "day": d.isoformat(),
-                            "type": "OVER_CAPACITY",
                             "position": pos,
                             "shift_code": code,
                             "fixed": cnt,
@@ -104,4 +111,30 @@ def validate_month(year: int, month: int) -> Dict[str, object]:
                     )
         d += timedelta(days=1)
 
-    return {"ok": not conflicts, "conflicts": conflicts}
+    # ---- leader duplicates in assignments ----
+    leader_day: Dict[date, List[int]] = defaultdict(list)
+    leader_night: Dict[date, List[int]] = defaultdict(list)
+    for day, staff_id, code, pos, role in assign_rows:
+        if code == "K" and (pos or "") == "TD":
+            leader_day[day].append(staff_id)
+        if code == "Đ" and (pos or "") == "TD" and role == "TC":
+            leader_night[day].append(staff_id)
+    for day, ids in leader_day.items():
+        if len(ids) > 1:
+            conflicts["leader_day_dup"].append({"day": day.isoformat(), "ids": ids})
+    for day, ids in leader_night.items():
+        if len(ids) > 1:
+            conflicts["leader_night_dup"].append({"day": day.isoformat(), "ids": ids})
+
+    for key in (
+        "offday_vs_fixed",
+        "double_fixed",
+        "invalid_position",
+        "over_capacity",
+        "leader_day_dup",
+        "leader_night_dup",
+    ):
+        conflicts.setdefault(key, [])
+
+    ok = not any(conflicts.values())
+    return {"ok": ok, "conflicts": dict(conflicts)}
