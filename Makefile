@@ -1,28 +1,34 @@
-.PHONY: venv migrate seed run test dev-api format lint
+.PHONY: venv piptools install migrate seed run test format lint typecheck
 
 venv:
-	python3 -m venv .venv
-	. .venv/bin/activate && pip install -U pip
-	. .venv/bin/activate && pip install -r requirements.txt
-	- . .venv/bin/activate && pip install -r requirements-dev.txt
+	test -d .venv || python3 -m venv .venv
+
+piptools:
+	:
+
+install: venv
+	.venv/bin/pip install -r requirements.txt
+	-.venv/bin/pip install -r requirements-dev.txt
 
 migrate:
-	. .venv/bin/activate && python3 -c "from models import init_db; init_db()"
+	.venv/bin/python -c "from models import init_db; init_db()"
 
 seed:
-	. .venv/bin/activate && python3 seed.py
+	.venv/bin/python seed.py
 
 run:
-        . .venv/bin/activate && FLASK_ENV=development python3 app.py
+	.venv/bin/python app.py
 
 test:
-        . .venv/bin/activate && PYTHONPATH=. pytest -q
+	PYTHONPATH=. .venv/bin/pytest -q
 
 format:
-        . .venv/bin/activate && black . && ruff --fix .
+	.venv/bin/black .
+	.venv/bin/ruff . --fix
+	.venv/bin/isort .
 
 lint:
-        . .venv/bin/activate && ruff .
+	.venv/bin/ruff .
 
-dev-api:
-	. .venv/bin/activate && FLASK_ENV=development python3 app.py
+typecheck:
+	:
