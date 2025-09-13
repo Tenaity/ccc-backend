@@ -486,6 +486,60 @@ def export_audit():
         "Content-Disposition": f"attachment; filename=audit-{y:04d}-{m:02d}.csv"
     }
     return Response(stream_with_context(generate()), mimetype="text/csv", headers=headers)
+
+
+@app.get("/api/export/month.csv")
+def export_month_csv():
+    """Xuất lịch phân ca dạng CSV cho một tháng.
+
+    Các cột bao gồm: ``day``, ``staff_id``, ``full_name``, ``role``,
+    ``shift_code`` và ``position``. Dữ liệu được stream để tránh giữ
+    toàn bộ nội dung trong bộ nhớ.
+    """
+    today = date.today()
+    y = request.args.get("year", type=int) or today.year
+    m = request.args.get("month", type=int) or today.month
+
+    if m < 1 or m > 12:
+        return {"error": "month must be 1..12"}, 400
+
+    last_day = calendar.monthrange(y, m)[1]
+    start = date(y, m, 1)
+    end = date(y, m, last_day)
+
+    with SessionLocal() as s:
+        rows = (
+            s.query(
+                Assignment.day,
+                Assignment.staff_id,
+                Staff.full_name,
+                Staff.role,
+                Assignment.shift_code,
+                Assignment.position,
+            )
+            .join(Staff, Assignment.staff_id == Staff.id)
+            .filter(Assignment.day.between(start, end))
+            .order_by(Assignment.day, Assignment.staff_id)
+            .all()
+        )
+
+    def generate():
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["day", "staff_id", "full_name", "role", "shift_code", "position"])
+        yield buf.getvalue()
+        buf.seek(0)
+        buf.truncate(0)
+        for d, sid, name, role, shift, pos in rows:
+            writer.writerow([d.isoformat(), sid, name, role, shift, pos or ""])
+            yield buf.getvalue()
+            buf.seek(0)
+            buf.truncate(0)
+
+    headers = {
+        "Content-Disposition": f"attachment; filename=schedule-{y:04d}-{m:02d}.csv"
+    }
+    return Response(stream_with_context(generate()), mimetype="text/csv", headers=headers)
     
 @app.get("/api/rules/expected")
 def rule_expected():
