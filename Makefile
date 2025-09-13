@@ -1,4 +1,4 @@
-.PHONY: venv migrate seed run test dev-api
+.PHONY: venv migrate seed run test dev-api format lint
 
 venv:
 	python3 -m venv .venv
@@ -13,10 +13,16 @@ seed:
 	. .venv/bin/activate && python3 seed.py
 
 run:
-	. .venv/bin/activate && FLASK_ENV=development python3 app.py
+        . .venv/bin/activate && FLASK_ENV=development python3 app.py
 
 test:
-	. .venv/bin/activate && PYTHONPATH=. pytest -q
+        . .venv/bin/activate && PYTHONPATH=. pytest -q
+
+format:
+        . .venv/bin/activate && black . && ruff --fix .
+
+lint:
+        . .venv/bin/activate && ruff .
 
 dev-api:
 	. .venv/bin/activate && FLASK_ENV=development python3 app.py
