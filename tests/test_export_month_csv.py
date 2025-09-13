@@ -5,6 +5,8 @@ from datetime import date
 
 import pytest
 
+import api.export_month_csv as export_module
+
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
@@ -14,6 +16,7 @@ def client(tmp_path, monkeypatch):
     import app as app_module
     importlib.reload(models)
     models.init_db()
+    importlib.reload(export_module)
     importlib.reload(app_module)
     return app_module.app.test_client(), models
 
