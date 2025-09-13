@@ -485,7 +485,11 @@ def export_audit():
     headers = {
         "Content-Disposition": f"attachment; filename=audit-{y:04d}-{m:02d}.csv"
     }
-    return Response(stream_with_context(generate()), mimetype="text/csv", headers=headers)
+    return Response(
+        stream_with_context(generate()),
+        content_type="text/csv; charset=utf-8",
+        headers=headers,
+    )
 
 
 @app.get("/api/export/month.csv")
@@ -539,7 +543,11 @@ def export_month_csv():
     headers = {
         "Content-Disposition": f"attachment; filename=schedule-{y:04d}-{m:02d}.csv"
     }
-    return Response(stream_with_context(generate()), mimetype="text/csv", headers=headers)
+    return Response(
+        stream_with_context(generate()),
+        content_type="text/csv; charset=utf-8",
+        headers=headers,
+    )
     
 @app.get("/api/rules/expected")
 def rule_expected():
