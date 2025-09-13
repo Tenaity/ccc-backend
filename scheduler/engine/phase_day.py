@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from typing import Set
+from typing import Dict, Set
 from datetime import date, timedelta
 
 from rules.types import ShiftCode
@@ -26,18 +26,24 @@ def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
         detail = ctx.profile.day_detail(kind=day_kind(d, ctx.holidays))
 
         # ============ 1) fixed trước (nếu có) ============
+        fixed_block: Dict[tuple[str, str], int] = {}
         for r in ctx.fixed.get(d, []):
             pos = getattr(r, "position", "TD") or "TD"
+            key = (pos, r.shift_code)
             if r.staff_id in locked_today:
-                day_log(ctx, f"{d.isoformat()} SKIP (locked) #{r.staff_id}")
+                day_log(ctx, f"{d.isoformat()} [FIX_BLOCK] {r.shift_code}@{pos} #{r.staff_id} locked")
+                fixed_block[key] = fixed_block.get(key, 0) + 1
                 continue
             if r.staff_id in used:
+                day_log(ctx, f"{d.isoformat()} [FIXED] keep {r.shift_code}@{pos} #{r.staff_id}")
                 continue
             if not ctx.can_take(r.staff_id, r.shift_code):
+                day_log(ctx, f"{d.isoformat()} [FIX_BLOCK] {r.shift_code}@{pos} #{r.staff_id} quota")
+                fixed_block[key] = fixed_block.get(key, 0) + 1
                 continue
             ctx.do_place(d, r.staff_id, r.shift_code, pos)
             used.add(r.staff_id)
-            day_log(ctx, f"{d.isoformat()} FIXED {r.shift_code}@{pos} -> #{r.staff_id}")
+            day_log(ctx, f"{d.isoformat()} [FIXED] {r.shift_code}@{pos} -> #{r.staff_id}")
 
         # Đếm số lượng đã được phân ca trước khi dispatch thêm
         td_k_filled = pgd_k_filled = pgd_ca2_filled = td_ca1_filled = td_ca2_filled = 0
@@ -55,11 +61,11 @@ def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
             elif p.position == "TD" and p.shift_code == ShiftCode.CA2:
                 td_ca2_filled += 1
 
-        k_td_need = max(int(detail.TD.get(ShiftCode.K, 0)) - td_k_filled, 0)
-        pgd_k_need = max(int(detail.PGD.get(ShiftCode.K, 0)) - pgd_k_filled, 0)
-        pgd_ca2_need = max(int(detail.PGD.get(ShiftCode.CA2, 0)) - pgd_ca2_filled, 0)
-        td_ca1_need = max(int(detail.TD.get(ShiftCode.CA1, 0)) - td_ca1_filled, 0)
-        td_ca2_need = max(int(detail.TD.get(ShiftCode.CA2, 0)) - td_ca2_filled, 0)
+        k_td_need = max(int(detail.TD.get(ShiftCode.K, 0)) - td_k_filled - fixed_block.get(("TD", ShiftCode.K), 0), 0)
+        pgd_k_need = max(int(detail.PGD.get(ShiftCode.K, 0)) - pgd_k_filled - fixed_block.get(("PGD", ShiftCode.K), 0), 0)
+        pgd_ca2_need = max(int(detail.PGD.get(ShiftCode.CA2, 0)) - pgd_ca2_filled - fixed_block.get(("PGD", ShiftCode.CA2), 0), 0)
+        td_ca1_need = max(int(detail.TD.get(ShiftCode.CA1, 0)) - td_ca1_filled - fixed_block.get(("TD", ShiftCode.CA1), 0), 0)
+        td_ca2_need = max(int(detail.TD.get(ShiftCode.CA2, 0)) - td_ca2_filled - fixed_block.get(("TD", ShiftCode.CA2), 0), 0)
 
         # ============ 2) TD · K (leader) = từ TC ============
         if k_td_need > 0:

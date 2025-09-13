@@ -57,3 +57,14 @@ def test_over_capacity_conflict(fresh_db):
     assert conflict[0]["shift_code"] == "K"
     assert conflict[0]["fixed"] == 3
     assert conflict[0]["expected"] < 3
+
+
+def test_unfulfilled_fixed_conflict(fresh_db):
+    models, validate = fresh_db
+    day = date(2025, 9, 2)
+    with models.SessionLocal() as s:
+        s.add(models.Staff(id=1, full_name="A"))
+        s.add(models.FixedAssignment(staff_id=1, day=day, shift_code="CA1", position="TD"))
+        s.commit()
+    res = validate.validate_month(2025, 9)
+    assert res["conflicts"].get("unfulfilled_fixed")

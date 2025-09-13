@@ -82,3 +82,36 @@ def test_fixed_assignments_do_not_duplicate():
     # không có staff mới nào được thêm ngoài danh sách cố định
     assert {p.staff_id for p in planned} == {1, 2, 3, 4, 5}
 
+
+def test_fixed_blocked_slot_skipped():
+    d = date(2025, 1, 1)
+    planned = []
+
+    def can_take(sid, code):
+        return True
+
+    def do_place(day, staff_id, code, position):
+        planned.append(SimpleNamespace(day=day, staff_id=staff_id, shift_code=code, position=position))
+
+    ctx = SimpleNamespace(
+        locked={d: {1}},  # staff 1 locked
+        fixed={d: [SimpleNamespace(staff_id=1, shift_code="K")]},
+        _planned=planned,
+        profile=DummyProfile(),
+        holidays=set(),
+        can_take=can_take,
+        do_place=do_place,
+        q_tc_day=deque([DummyStaff(id=2)]),
+        q_gdv1=deque([DummyStaff(id=7, rank=1)]),
+        q_gdv2=deque([DummyStaff(id=8, rank=2)]),
+        save=False,
+        session=None,
+        rng=random.Random(0),
+    )
+
+    fair = FairnessWindow(rank_map={7: 1, 8: 2, 2: 1, 1: 1})
+
+    run_phase_day(ctx, d, d, fair)
+
+    # no assignment for TD.K should be added because fixed slot is blocked and skipped
+    assert not any(p.position == "TD" and p.shift_code == "K" for p in planned)

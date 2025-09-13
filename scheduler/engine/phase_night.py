@@ -1,7 +1,7 @@
 # backend/scheduler/engine/phase_night.py
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import List, Set
+from typing import Dict, List, Set
 from datetime import date, timedelta
 
 from .core import Context
@@ -58,19 +58,25 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
         leader_id = None
 
         # Fixed assignments for night
+        fixed_block: Dict[str, int] = {}
         for r in ctx.fixed.get(d, []):
             if r.shift_code != "Đ":
                 continue
             pos = getattr(r, "position", "TD") or "TD"
             if r.staff_id in locked_today:
-                night_log(ctx, f"{d.isoformat()} SKIP (locked) #{r.staff_id}")
+                night_log(ctx, f"{d.isoformat()} [FIX_BLOCK] Đ@{pos} #{r.staff_id} locked")
+                fixed_block[pos] = fixed_block.get(pos, 0) + 1
                 continue
             if r.staff_id in used:
+                night_log(ctx, f"{d.isoformat()} [FIXED] keep Đ@{pos} #{r.staff_id}")
                 continue
             if not ctx.can_take(r.staff_id, "Đ"):
+                night_log(ctx, f"{d.isoformat()} [FIX_BLOCK] Đ@{pos} #{r.staff_id} quota")
+                fixed_block[pos] = fixed_block.get(pos, 0) + 1
                 continue
             if pos == "TD" and getattr(r, "role", "") == "TC" and placed_leader:
-                night_log(ctx, f"{d.isoformat()} SKIP extra TC leader #{r.staff_id}")
+                night_log(ctx, f"{d.isoformat()} [FIX_BLOCK] extra TC leader #{r.staff_id}")
+                fixed_block[pos] = fixed_block.get(pos, 0) + 1
                 continue
             ctx.do_place(d, r.staff_id, "Đ", pos)
             used.add(r.staff_id)
@@ -81,7 +87,10 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
                     leader_id = r.staff_id
             elif pos == "PGD":
                 pgd_total = max(pgd_total - 1, 0)
-            night_log(ctx, f"{d.isoformat()} FIXED Đ@{pos} -> #{r.staff_id}")
+            night_log(ctx, f"{d.isoformat()} [FIXED] Đ@{pos} -> #{r.staff_id}")
+
+        td_total = max(td_total - fixed_block.get("TD", 0), 0)
+        pgd_total = max(pgd_total - fixed_block.get("PGD", 0), 0)
 
         # jitter hàng đợi mỗi ngày (nếu bật)
         if RAND_CFG.get("daily_jitter"):

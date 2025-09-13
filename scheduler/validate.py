@@ -126,6 +126,23 @@ def validate_month(year: int, month: int) -> Dict[str, object]:
         if len(ids) > 1:
             conflicts["leader_night_dup"].append({"day": day.isoformat(), "ids": ids})
 
+    assign_set = {
+        (day, staff_id, code, (pos or "TD"))
+        for day, staff_id, code, pos, _ in assign_rows
+    }
+    for r in fixed_rows:
+        pos = getattr(r, "position", "TD") or "TD"
+        key = (r.day, r.staff_id, r.shift_code, pos)
+        if key not in assign_set:
+            conflicts["unfulfilled_fixed"].append(
+                {
+                    "day": r.day.isoformat(),
+                    "staff_id": r.staff_id,
+                    "shift_code": r.shift_code,
+                    "position": pos,
+                }
+            )
+
     for key in (
         "offday_vs_fixed",
         "double_fixed",
@@ -133,6 +150,7 @@ def validate_month(year: int, month: int) -> Dict[str, object]:
         "over_capacity",
         "leader_day_dup",
         "leader_night_dup",
+        "unfulfilled_fixed",
     ):
         conflicts.setdefault(key, [])
 
