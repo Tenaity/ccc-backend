@@ -5,6 +5,7 @@ from scheduler.engine.phase_day import run_phase_day
 from scheduler.engine.utils_rank import FairnessWindow
 
 from .conftest import build_ctx
+import scheduler.validate as validate
 
 
 def _fairness(ctx):
@@ -54,3 +55,12 @@ def test_rank_and_fixed_off(session):
             rk = 1
         ranks[rk] += 1
     assert abs(ranks[1] - ranks[2]) <= 1
+
+
+def test_generate_respects_fixed_validate_ok(session):
+    ctx, _, _ = build_ctx(2025, 1, seed=1, save=True)
+    d = date(2025, 1, 4)
+    run_phase_day(ctx, d, d, _fairness(ctx))
+    res = validate.validate_month(2025, 1)
+    assert res["ok"]
+    assert not res["conflicts"].get("unfulfilled_fixed")
