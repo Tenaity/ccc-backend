@@ -1,14 +1,21 @@
 # backend/scheduler/engine/phase_night.py
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import Dict, List, Set
+
 from datetime import date, timedelta
+from typing import Dict, List, Set
+
+from scheduler.randomize import CFG as RAND_CFG
+from scheduler.utils import day_kind
 
 from .core import Context
-from .utils_rank import ChoiceCtx, fill_ranked_slots, budget_for_day, FairnessWindow  # dùng bản trong engine/
-from scheduler.utils import day_kind
-from scheduler.randomize import CFG as RAND_CFG
 from .logging import night_log
+from .utils_rank import (
+    ChoiceCtx,
+    FairnessWindow,
+    budget_for_day,
+    fill_ranked_slots,
+)  # dùng bản trong engine/
 
 # Cho phép “cứu cháy” leader đêm: bỏ rào trần công nếu cần thiết
 ALLOW_OVERCAP_NIGHT_LEADER = True
@@ -19,10 +26,11 @@ def _get_total(night_detail: dict, place_key: str) -> int:
     night_detail: {"TD": {<key D>: x}, "PGD": {<key D>: y}}
     key D có thể là enum ShiftCode.D hoặc string "Đ".
     """
-    box = (night_detail.get(place_key, {}) or {})
+    box = night_detail.get(place_key, {}) or {}
     # cố lấy theo enum nếu có, fallback sang string
     try:
         from rules.types import ShiftCode  # lazy import để tránh lỗi vòng
+
         return int(box.get(ShiftCode.D, box.get("Đ", 0)) or 0)
     except Exception:
         return int(box.get("Đ", 0) or 0)
@@ -101,7 +109,10 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
             if len(ctx.q_gdv2):
                 ctx.q_gdv2.rotate(ctx.rng.randrange(len(ctx.q_gdv2)))
 
-        night_log(ctx, f"{d.isoformat()} | need TD.D={td_total} PGD.D={pgd_total} | locked={sorted(locked_today)}")
+        night_log(
+            ctx,
+            f"{d.isoformat()} | need TD.D={td_total} PGD.D={pgd_total} | locked={sorted(locked_today)}",
+        )
 
         # ===== 1) Leader Đ @ TD (từ TC) =====
         if not placed_leader and td_total > 0:
@@ -203,7 +214,15 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
                 and getattr(x, "role", "GDV") != "TC"
             ]
 
-            ids = fill_ranked_slots(need=td_remain, pool_top1=pool_top1, pool_top2=pool_top2, cc=cc, fairness=fair, position="TD", want=budget)
+            ids = fill_ranked_slots(
+                need=td_remain,
+                pool_top1=pool_top1,
+                pool_top2=pool_top2,
+                cc=cc,
+                fairness=fair,
+                position="TD",
+                want=budget,
+            )
 
             placed = 0
             for sid in ids:
@@ -219,7 +238,12 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
 
             got1, got2 = fair.today_for("Đ", "TD")
             win1, win2 = fair.summary("Đ", "TD")
-            print(f"[FAIR] {d.isoformat()} TD.Đ want r1={budget[1]} r2={budget[2]} | got r1={got1} r2={got2} | window7 r1={win1} r2={win2}")
+            print(
+                (
+                    f"[FAIR] {d.isoformat()} TD.Đ want r1={budget[1]} r2={budget[2]} | "
+                    f"got r1={got1} r2={got2} | window7 r1={win1} r2={win2}"
+                )
+            )
 
         # ===== 3) Đ @ PGD =====
         if pgd_total > 0:
@@ -240,7 +264,15 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
                 and getattr(x, "can_night", True)
                 and getattr(x, "role", "GDV") != "TC"
             ]
-            ids = fill_ranked_slots(need=pgd_total, pool_top1=pool_top1, pool_top2=pool_top2, cc=cc, fairness=fair, position="PGD", want=budget)
+            ids = fill_ranked_slots(
+                need=pgd_total,
+                pool_top1=pool_top1,
+                pool_top2=pool_top2,
+                cc=cc,
+                fairness=fair,
+                position="PGD",
+                want=budget,
+            )
 
             placed = 0
             for sid in ids:
@@ -254,8 +286,11 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
             if remain > 0:
                 night_log(ctx, f"  PGD.D fallback TC remain={remain}")
                 pool_tc = [
-                    x for x in list(ctx.q_tc_night)
-                    if x.id not in used and x.id not in locked_today and getattr(x, "can_night", True)
+                    x
+                    for x in list(ctx.q_tc_night)
+                    if x.id not in used
+                    and x.id not in locked_today
+                    and getattr(x, "can_night", True)
                 ]
                 while remain > 0 and pool_tc:
                     idx = ctx.rng.randrange(len(pool_tc))
@@ -271,10 +306,21 @@ def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow)
 
             got1, got2 = fair.today_for("Đ", "PGD")
             win1, win2 = fair.summary("Đ", "PGD")
-            print(f"[FAIR] {d.isoformat()} PGD.Đ want r1={budget[1]} r2={budget[2]} | got r1={got1} r2={got2} | window7 r1={win1} r2={win2}")
+            print(
+                (
+                    f"[FAIR] {d.isoformat()} PGD.Đ want r1={budget[1]} r2={budget[2]} | "
+                    f"got r1={got1} r2={got2} | window7 r1={win1} r2={win2}"
+                )
+            )
 
         # ===== summary ngày
-        night_log(ctx, f"summary {d.isoformat()} | leader={leader_id if placed_leader else '-'} | TD.D={td_total} | PGD.D={pgd_total}")
+        night_log(
+            ctx,
+            (
+                f"summary {d.isoformat()} | leader={leader_id if placed_leader else '-'} | "
+                f"TD.D={td_total} | PGD.D={pgd_total}"
+            ),
+        )
 
         if ctx.save:
             ctx.session.commit()

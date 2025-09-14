@@ -3,10 +3,10 @@ import csv
 import io
 import re
 from datetime import date
-from flask import Response, stream_with_context
-from sqlalchemy import select
 
-from models import SessionLocal, Assignment, Staff
+from flask import Response, stream_with_context
+
+from models import Assignment, SessionLocal, Staff
 
 # Map shift code to credit value
 SHIFT_CREDIT = {
@@ -20,12 +20,14 @@ SHIFT_CREDIT = {
 
 _RANK_RE = re.compile(r"\[RANK:(1|2)\]")
 
+
 def _extract_rank(notes: str | None) -> str:
     """Extract rank from staff notes."""
     if not notes:
         return ""
     m = _RANK_RE.search(notes)
     return m.group(1) if m else ""
+
 
 def export_month_csv(year: int, month: int) -> Response:
     """Stream assignment data of a month as CSV.
@@ -67,9 +69,7 @@ def export_month_csv(year: int, month: int) -> Response:
             buf.seek(0)
             buf.truncate(0)
 
-    headers = {
-        "Content-Disposition": f"attachment; filename=schedule-{year:04d}-{month:02d}.csv"
-    }
+    headers = {"Content-Disposition": f"attachment; filename=schedule-{year:04d}-{month:02d}.csv"}
     return Response(
         stream_with_context(generate()),
         content_type="text/csv; charset=utf-8",

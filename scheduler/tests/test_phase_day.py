@@ -1,11 +1,11 @@
-from datetime import date
 import re
+from datetime import date
 
+import scheduler.validate as validate
 from scheduler.engine.phase_day import run_phase_day
 from scheduler.engine.utils_rank import FairnessWindow
 
 from .conftest import build_ctx
-import scheduler.validate as validate
 
 
 def _fairness(ctx):
@@ -25,7 +25,11 @@ def test_day_leader_single_tc(session, capsys):
     run_phase_day(ctx, d, d, _fairness(ctx))
     assigns = [p for p in ctx._planned if p.day == d]
     smap = _staff_map(ctx)
-    tc_leaders = [a for a in assigns if a.shift_code == "K" and a.position == "TD" and smap[a.staff_id].role == "TC"]
+    tc_leaders = [
+        a
+        for a in assigns
+        if a.shift_code == "K" and a.position == "TD" and smap[a.staff_id].role == "TC"
+    ]
     assert len(tc_leaders) == 1
     out = capsys.readouterr().out
     assert re.search(rf"summary {d.isoformat()} \| TD: K=", out)

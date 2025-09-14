@@ -1,6 +1,6 @@
 import csv
-import io
 import importlib
+import io
 from datetime import date
 
 import pytest
@@ -12,8 +12,9 @@ import api.export_month_csv as export_module
 def client(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
-    import models
     import app as app_module
+    import models
+
     importlib.reload(models)
     models.init_db()
     importlib.reload(export_module)
@@ -24,14 +25,20 @@ def client(tmp_path, monkeypatch):
 def test_export_month_csv_streams(client):
     client_app, models = client
     with models.SessionLocal() as s:
-        s.add_all([
-            models.Staff(id=1, full_name="Alice, Jr", role="GDV", notes="[RANK:1]"),
-            models.Staff(id=2, full_name="Bob\nSmith", role="TC", notes="[RANK:2]"),
-        ])
-        s.add_all([
-            models.Assignment(staff_id=1, day=date(2025, 9, 1), shift_code="CA1", position=None),
-            models.Assignment(staff_id=2, day=date(2025, 9, 2), shift_code="K", position="TD"),
-        ])
+        s.add_all(
+            [
+                models.Staff(id=1, full_name="Alice, Jr", role="GDV", notes="[RANK:1]"),
+                models.Staff(id=2, full_name="Bob\nSmith", role="TC", notes="[RANK:2]"),
+            ]
+        )
+        s.add_all(
+            [
+                models.Assignment(
+                    staff_id=1, day=date(2025, 9, 1), shift_code="CA1", position=None
+                ),
+                models.Assignment(staff_id=2, day=date(2025, 9, 2), shift_code="K", position="TD"),
+            ]
+        )
         s.commit()
     res = client_app.get("/api/export/month.csv?year=2025&month=9")
     assert res.status_code == 200

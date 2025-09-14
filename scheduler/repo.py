@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
+
 import re
 from collections import defaultdict
-from typing import Set, Dict, List
+from typing import List
+
 from sqlalchemy import select
 
-from models import SessionLocal, Staff, FixedAssignment, OffDay, Holiday, Assignment
+from models import FixedAssignment, Holiday, OffDay, Staff
+
 
 # ---------- helpers ----------
 def _parse_rank(notes: str | None) -> int | None:
@@ -17,8 +20,10 @@ def _parse_rank(notes: str | None) -> int | None:
     except Exception:
         return None
 
+
 def _is_maternity(notes: str | None) -> bool:
     return bool(notes and "nghỉ sinh" in notes.lower())
+
 
 # ---------- loaders ----------
 def load_staff(session):
@@ -54,11 +59,13 @@ def load_staff(session):
 
     return TC, GDV1, GDV2, HC
 
+
 def load_locked(session):
     mp = defaultdict(set)  # day -> set(staff_id)
     for r in session.query(OffDay).all():
         mp[r.day].add(r.staff_id)
     return mp
+
 
 def load_fixed(session):
     mp = defaultdict(list)  # day -> list[FixedAssignment]
@@ -66,8 +73,10 @@ def load_fixed(session):
         mp[r.day].append(r)
     return mp
 
+
 def load_holidays(session) -> set:
     return {r.day for r in session.query(Holiday).all()}
+
 
 def write_assignments(session, items):
     for it in items:

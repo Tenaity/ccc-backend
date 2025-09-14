@@ -1,12 +1,12 @@
+import random
 from collections import deque
 from dataclasses import dataclass
-from types import SimpleNamespace
 from datetime import date
-import random
+from types import SimpleNamespace
 
+from rules.types import ShiftCode
 from scheduler.engine.phase_day import run_phase_day
 from scheduler.engine.utils_rank import FairnessWindow
-from rules.types import ShiftCode
 
 
 @dataclass
@@ -32,7 +32,9 @@ def test_fixed_assignments_do_not_duplicate():
         return True
 
     def do_place(day, staff_id, code, position):
-        planned.append(SimpleNamespace(day=day, staff_id=staff_id, shift_code=code, position=position))
+        planned.append(
+            SimpleNamespace(day=day, staff_id=staff_id, shift_code=code, position=position)
+        )
 
     ctx = SimpleNamespace(
         locked={},
@@ -56,7 +58,7 @@ def test_fixed_assignments_do_not_duplicate():
         rng=random.Random(0),
     )
 
-    fair = FairnessWindow(rank_map={7:1,8:2,6:1,1:1,2:1,3:1,4:1,5:1})
+    fair = FairnessWindow(rank_map={7: 1, 8: 2, 6: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1})
 
     # Pre-existing PGD assignments (simulate fixed at PGD)
     do_place(d, 4, "K", "PGD")
@@ -91,7 +93,9 @@ def test_fixed_blocked_slot_skipped():
         return True
 
     def do_place(day, staff_id, code, position):
-        planned.append(SimpleNamespace(day=day, staff_id=staff_id, shift_code=code, position=position))
+        planned.append(
+            SimpleNamespace(day=day, staff_id=staff_id, shift_code=code, position=position)
+        )
 
     ctx = SimpleNamespace(
         locked={d: {1}},  # staff 1 locked

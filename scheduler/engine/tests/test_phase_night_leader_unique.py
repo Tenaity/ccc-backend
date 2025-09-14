@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-from datetime import date
-from collections import deque
+
 import random
 import types
+from collections import deque
+from datetime import date
 
 import pytest
 
@@ -23,9 +24,15 @@ class FakeCtx:
     """Lightweight Context double for phase_night tests."""
 
     def __init__(self, *, tc_ids, gdv1_ids, gdv2_ids, holidays=None, locked=None):
-        self.q_tc_night = deque([types.SimpleNamespace(id=i, can_night=True, role="TC") for i in tc_ids])
-        self.q_gdv1 = deque([types.SimpleNamespace(id=i, can_night=True, role="GDV", rank=1) for i in gdv1_ids])
-        self.q_gdv2 = deque([types.SimpleNamespace(id=i, can_night=True, role="GDV", rank=2) for i in gdv2_ids])
+        self.q_tc_night = deque(
+            [types.SimpleNamespace(id=i, can_night=True, role="TC") for i in tc_ids]
+        )
+        self.q_gdv1 = deque(
+            [types.SimpleNamespace(id=i, can_night=True, role="GDV", rank=1) for i in gdv1_ids]
+        )
+        self.q_gdv2 = deque(
+            [types.SimpleNamespace(id=i, can_night=True, role="GDV", rank=2) for i in gdv2_ids]
+        )
         self.q_gdv = deque(list(self.q_gdv1) + list(self.q_gdv2))
 
         self.locked = locked or {}
@@ -76,7 +83,9 @@ def _count_leaders(ctx: FakeCtx, the_day: date, tc_set: set[int]):
 
 
 def _count_code_pos(ctx: FakeCtx, the_day: date, code: str, pos: str):
-    return sum(1 for p in ctx._planned if p.day == the_day and p.shift_code == code and p.position == pos)
+    return sum(
+        1 for p in ctx._planned if p.day == the_day and p.shift_code == code and p.position == pos
+    )
 
 
 def test_night_has_single_tc_leader_and_gdv_fill_rest(the_day):
@@ -99,7 +108,10 @@ def test_night_has_single_tc_leader_and_gdv_fill_rest(the_day):
     non_leader_td = [
         p
         for p in ctx._planned
-        if p.day == the_day and p.shift_code == "Đ" and p.position == "TD" and p.staff_id not in tc_set
+        if p.day == the_day
+        and p.shift_code == "Đ"
+        and p.position == "TD"
+        and p.staff_id not in tc_set
     ]
     assert len(non_leader_td) == 2, "Two remaining TD.D should be GDV (not TC)"
 

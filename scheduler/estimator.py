@@ -1,10 +1,11 @@
 # backend/scheduler/estimate.py
 # -*- coding: utf-8 -*-
 from __future__ import annotations
+
 import calendar
 from datetime import date, timedelta
 
-from models import SessionLocal, Staff, Holiday
+from models import Holiday, SessionLocal, Staff
 from rules import get_profile
 
 # Mã ca chuẩn (string) dùng cho estimate/credits
@@ -64,8 +65,7 @@ def estimate_month(year: int, month: int):
 
         # Chỉ lấy các ngày nằm trong khoảng tháng (r.day là date, không phải Column)
         holidays: set[date] = {
-            r.day for r in holiday_rows
-            if isinstance(r.day, date) and (first <= r.day <= last)
+            r.day for r in holiday_rows if isinstance(r.day, date) and (first <= r.day <= last)
         }
 
         profile = get_profile()
@@ -75,8 +75,8 @@ def estimate_month(year: int, month: int):
             kind = day_kind(d, holidays)
 
             # Nhu cầu theo rule (đã chuẩn hoá sang string-key)
-            day_det = profile.expected_day_counts(kind)     # {"TD": {...}, "PGD": {...}}
-            night_det = profile.expected_night_counts(kind) # {"TD": {"Đ": a}, "PGD": {"Đ": b}}
+            day_det = profile.expected_day_counts(kind)  # {"TD": {...}, "PGD": {...}}
+            night_det = profile.expected_night_counts(kind)  # {"TD": {"Đ": a}, "PGD": {"Đ": b}}
 
             td = day_det.get("TD", {}) or {}
             pgd = day_det.get("PGD", {}) or {}
@@ -124,19 +124,15 @@ def estimate_month(year: int, month: int):
             "year": year,
             "month": month,
             "days_in_month": month_last_day(year, month),
-
             # Nhu cầu theo mã (slot người-ca)
             "required_shifts_total": sum(req_by_shift.values()),
             "required_shifts_by_code": req_by_shift,
-
             # Nhu cầu công quy đổi
             "required_credits_total": required_credits_total,
             "required_credits_by_shift": required_credits_by_shift,
-
             # Nguồn cung (quota)
             "supply_total": supply_total,
             "supply_by_staff": supply_by_staff,
-
             # Chênh lệch
             "delta_total": round(supply_total - required_credits_total, 2),
             "delta_by_staff": delta_by_staff,

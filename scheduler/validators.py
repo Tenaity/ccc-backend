@@ -9,7 +9,9 @@ from typing import Dict, Iterable, List, Tuple
 from .placements import Planned
 
 
-def validate_one_day_leader(planned: List[Planned], first: date, last: date) -> List[Tuple[date, int]]:
+def validate_one_day_leader(
+    planned: List[Planned], first: date, last: date
+) -> List[Tuple[date, int]]:
     """Return days where count of K@TD is not exactly one."""
     by = defaultdict(int)
     for p in planned:
@@ -25,7 +27,9 @@ def validate_one_day_leader(planned: List[Planned], first: date, last: date) -> 
     return bad
 
 
-def find_leader_duplicates(planned: Iterable[Planned], tc_ids: Iterable[int]) -> Tuple[Dict[date, List[int]], Dict[date, List[int]]]:
+def find_leader_duplicates(
+    planned: Iterable[Planned], tc_ids: Iterable[int]
+) -> Tuple[Dict[date, List[int]], Dict[date, List[int]]]:
     """Detect duplicate leaders for day (K@TD) and night (Đ@TD from TC).
 
     Returns two dicts mapping day -> list of staff ids for offending days.

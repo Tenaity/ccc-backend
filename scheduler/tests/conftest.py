@@ -1,10 +1,12 @@
 import os
+
 os.environ.setdefault("DB_URL", "sqlite:///:memory:")
 
 from datetime import date
+
 import pytest
 
-from models import Base, engine, SessionLocal, init_db, Staff, FixedAssignment, OffDay, Holiday
+from models import Base, FixedAssignment, Holiday, OffDay, SessionLocal, Staff, engine, init_db
 
 
 def seed_small(session):
@@ -20,9 +22,9 @@ def seed_small(session):
     ]
     session.add_all(staff)
     # fixed assignment & off day sample for 2025-01-04 (Saturday)
-    session.add(FixedAssignment(staff_id=3, day=date(2025,1,4), shift_code="CA1", position="TD"))
-    session.add(OffDay(staff_id=6, day=date(2025,1,4)))
-    session.add(Holiday(day=date(2025,1,1), name="NewYear"))
+    session.add(FixedAssignment(staff_id=3, day=date(2025, 1, 4), shift_code="CA1", position="TD"))
+    session.add(OffDay(staff_id=6, day=date(2025, 1, 4)))
+    session.add(Holiday(day=date(2025, 1, 1), name="NewYear"))
     session.commit()
 
 
@@ -38,5 +40,6 @@ def session():
 
 def build_ctx(year, month, seed=0, save=False):
     from scheduler.engine.core import build_context
+
     ctx, first, last = build_context(year=year, month=month, shuffle=False, seed=seed, save=save)
     return ctx, first, last

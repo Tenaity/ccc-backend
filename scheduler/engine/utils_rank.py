@@ -1,14 +1,17 @@
 # backend/scheduler/utils_rank.py
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-from collections import deque, defaultdict
-from typing import Dict, Iterable, List, Optional, Tuple, Set
+
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import date
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from models import Staff
 from scheduler.randomize import choose, choose_relaxed
+
 from .core import Context
+
 
 @dataclass
 class ChoiceCtx:
@@ -16,7 +19,8 @@ class ChoiceCtx:
     code: str
     locked_today: Set[int]
     ctx: Context
-    used: Set[int] = field(default_factory=set)    # 👈 thêm used (mặc định set rỗng)
+    used: Set[int] = field(default_factory=set)  # 👈 thêm used (mặc định set rỗng)
+
 
 def _rank_of(staff_obj: Staff) -> int:
     r = getattr(staff_obj, "rank", None)
@@ -24,6 +28,7 @@ def _rank_of(staff_obj: Staff) -> int:
         return int(r) if r is not None else 2
     except Exception:
         return 2
+
 
 def split_need(need: int) -> Tuple[int, int]:
     if need <= 0:
@@ -41,6 +46,7 @@ def budget_for_day(_d: date, _kind: str, want_total: int) -> Dict[int, int]:
     """
     r1, r2 = split_need(want_total)
     return {1: r1, 2: r2}
+
 
 def _pick_one(pool: List[Staff], cc: ChoiceCtx, *, relaxed=False) -> Optional[Staff]:
     if not pool:
@@ -68,7 +74,9 @@ class FairnessWindow:
 
     rank_map: Dict[int, int]
     size: int = 7
-    _data: Dict[Tuple[str, str, int], deque[int]] = field(default_factory=lambda: defaultdict(deque))
+    _data: Dict[Tuple[str, str, int], deque[int]] = field(
+        default_factory=lambda: defaultdict(deque)
+    )
     _today: Optional[date] = None
     _today_counts: Dict[Tuple[str, str, int], int] = field(default_factory=dict)
 

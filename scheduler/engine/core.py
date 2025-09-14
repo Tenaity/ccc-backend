@@ -1,19 +1,21 @@
 # backend/scheduler/core.py
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Any, DefaultDict, Dict, List, Set, Tuple, Deque
+
 import random
-from collections import deque, defaultdict
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
 from datetime import date
+from typing import Any, DefaultDict, Deque, Dict, List, Set, Tuple
+
 from sqlalchemy.orm import Session
 
 from models import SessionLocal
 from rules import get_profile
 from rules.base import RuleProfile
-from scheduler.utils import ymd, month_last_day
-from scheduler.repo import load_staff, load_locked, load_fixed, load_holidays
-from scheduler.placements import place, after_place, Planned
+from scheduler.placements import Planned, after_place, place
+from scheduler.repo import load_fixed, load_holidays, load_locked, load_staff
+from scheduler.utils import month_last_day, ymd
 
 ShiftCode = str
 Position = str | None
@@ -41,9 +43,9 @@ class Context:
     q_gdv: Deque[Any]
 
     # ===== ràng buộc theo ngày
-    locked: Dict[date, Set[int]]     # Off/lock
-    fixed: Dict[date, list]          # đăng ký cố định
-    holidays: Set[date]              # ngày lễ
+    locked: Dict[date, Set[int]]  # Off/lock
+    fixed: Dict[date, list]  # đăng ký cố định
+    holidays: Set[date]  # ngày lễ
 
     # ===== quota & credit hiện tại
     base_quota: Dict[int, float]
@@ -59,20 +61,31 @@ class Context:
 
     def can_take(self, staff_id: int, code: str) -> bool:
         """Không để vượt trần base_quota + TOLERANCE."""
-        return (self.credit_map[staff_id] + self.credits.get(code, 0.0)) <= \
-               (self.base_quota.get(staff_id, 0.0) + TOLERANCE + 1e-9)
+        return (self.credit_map[staff_id] + self.credits.get(code, 0.0)) <= (
+            self.base_quota.get(staff_id, 0.0) + TOLERANCE + 1e-9
+        )
 
     def do_place(self, day: date, staff_id: int, code: str, position: Position):
         """place + cập nhật credit_map + trackers."""
-        place(self.session, self._planned, day=day, staff_id=staff_id, code=code, position=position, save=self.save)
+        place(
+            self.session,
+            self._planned,
+            day=day,
+            staff_id=staff_id,
+            code=code,
+            position=position,
+            save=self.save,
+        )
         self.credit_map[staff_id] += self.credits.get(code, 0.0)
         after_place(staff_id, day, code)
 
 
-def build_context(*, year: int, month: int, shuffle: bool, seed: int | None, save: bool) -> Tuple[Context, date, date]:
+def build_context(
+    *, year: int, month: int, shuffle: bool, seed: int | None, save: bool
+) -> Tuple[Context, date, date]:
     """Tạo ngữ cảnh chạy cho cả tháng + trả về (first, last)."""
     first = ymd(year, month, 1)
-    last  = ymd(year, month, month_last_day(year, month))
+    last = ymd(year, month, month_last_day(year, month))
 
     s = SessionLocal()
     profile: RuleProfile = get_profile()
@@ -95,8 +108,8 @@ def build_context(*, year: int, month: int, shuffle: bool, seed: int | None, sav
 
     rng = random.Random(seed) if shuffle else random.Random()
 
-    locked   = load_locked(s)
-    fixed    = load_fixed(s)
+    locked = load_locked(s)
+    fixed = load_fixed(s)
     holidays = load_holidays(s)
 
     base_quota = {st.id: float(getattr(st, "base_quota", 0.0)) for st in (TC + GDV1 + GDV2 + HC)}
@@ -104,12 +117,15 @@ def build_context(*, year: int, month: int, shuffle: bool, seed: int | None, sav
     ctx = Context(
         profile=profile,
         credits=credits,
-        TC=TC, GDV1=GDV1, GDV2=GDV2, HC=HC,
+        TC=TC,
+        GDV1=GDV1,
+        GDV2=GDV2,
+        HC=HC,
         q_tc_day=deque(TC),
         q_tc_night=deque(TC),
-        q_gdv1=deque(gdv1_with_tc),   # 👈 rank-1 gồm cả TC để có thể xếp như GDV khi cần
+        q_gdv1=deque(gdv1_with_tc),  # 👈 rank-1 gồm cả TC để có thể xếp như GDV khi cần
         q_gdv2=deque(GDV2),
-        q_gdv=deque(GDV1 + GDV2),     # legacy (không gồm TC, chỉ để code cũ dùng tạm)
+        q_gdv=deque(GDV1 + GDV2),  # legacy (không gồm TC, chỉ để code cũ dùng tạm)
         locked=locked,
         fixed=fixed,
         holidays=holidays,

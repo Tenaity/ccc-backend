@@ -6,6 +6,7 @@ def test_init_db_adds_position_column(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
     import models
+
     importlib.reload(models)
 
     # Calling twice should be idempotent
@@ -19,13 +20,14 @@ def test_init_db_adds_position_column(tmp_path, monkeypatch):
 
     with models.SessionLocal() as s:
         s.add(models.Staff(id=1, full_name="A"))
-        s.add(models.FixedAssignment(
-            staff_id=1,
-            day=date(2025, 1, 1),
-            shift_code="CA1",
-            position="PGD",
-        ))
+        s.add(
+            models.FixedAssignment(
+                staff_id=1,
+                day=date(2025, 1, 1),
+                shift_code="CA1",
+                position="PGD",
+            )
+        )
         s.commit()
         r = s.query(models.FixedAssignment).first()
         assert r.position == "PGD"
-

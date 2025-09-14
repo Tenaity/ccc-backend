@@ -1,26 +1,24 @@
 # backend/app.py
-import os
 import calendar
-import pathlib
-from datetime import date
-from flask import Flask, jsonify, request, send_from_directory
-from flask_cors import CORS
-from sqlalchemy import select, text
-
-from models import init_db, SessionLocal, Staff, FixedAssignment, OffDay, Assignment, Holiday
-from rules import SHIFT_DEFS
-from scheduler import schedule_month as generate_schedule  
-from scheduler.estimator import estimate_month
-from scheduler.repo import load_staff, load_locked, load_fixed, load_holidays
-from datetime import date, timedelta
-from rules import get_profile
-from scheduler.utils import ymd, month_last_day, day_kind
-from scheduler.validate import validate_month
-
 import csv
 import io
 import json
-from flask import Response, stream_with_context
+import os
+import pathlib
+from datetime import date, timedelta
+
+from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
+from flask_cors import CORS
+from sqlalchemy import select, text
+
+from api.export_month_csv import export_month_csv as _export_month_csv
+from models import Assignment, FixedAssignment, OffDay, SessionLocal, Staff, init_db
+from rules import SHIFT_DEFS, get_profile
+from scheduler import schedule_month as generate_schedule
+from scheduler.estimator import estimate_month
+from scheduler.repo import load_holidays
+from scheduler.utils import day_kind, month_last_day, ymd
+from scheduler.validate import validate_month
 
 # Trỏ tới thư mục build của frontend (Vite) nếu đã build
 FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
@@ -35,6 +33,7 @@ CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 # Khởi tạo DB (tạo bảng nếu chưa có)
 init_db()
+
 
 # ---------- Root / SPA ----------
 @app.get("/")
@@ -55,6 +54,7 @@ def root():
         ],
     )
 
+
 @app.route("/<path:path>")
 def spa_assets(path: str):
     """Phục vụ static assets và fallback cho route SPA."""
@@ -67,14 +67,17 @@ def spa_assets(path: str):
             return send_from_directory(app.static_folder, "index.html")
     return {"error": "Not Found"}, 404
 
+
 # ---------- API ----------
 @app.get("/api/ping")
 def ping():
     return {"ok": True}
 
+
 @app.get("/api/shifts")
 def shifts():
     return jsonify(SHIFT_DEFS)
+
 
 @app.get("/api/staff")
 def list_staff():
@@ -94,6 +97,7 @@ def list_staff():
             ]
         )
 
+
 @app.post("/api/staff")
 def add_staff():
     data = request.get_json(force=True)
@@ -108,6 +112,7 @@ def add_staff():
         s.add(r)
         s.commit()
         return {"id": r.id}
+
 
 @app.delete("/api/staff/<int:staff_id>")
 def del_staff(staff_id: int):
@@ -352,11 +357,7 @@ def create_off_day():
             if not staff:
                 return {"error": "Staff not found"}, 404
 
-            existing = (
-                s.query(OffDay)
-                .filter(OffDay.staff_id == staff_id, OffDay.day == d)
-                .first()
-            )
+            existing = s.query(OffDay).filter(OffDay.staff_id == staff_id, OffDay.day == d).first()
             if existing:
                 return {"id": existing.id, "ok": True}
 
@@ -404,6 +405,7 @@ def create_off_day_alias():
 def delete_off_day_alias(off_id: int):
     return delete_off_day(off_id)
 
+
 @app.get("/api/assignments")
 def list_assignments():
     """Trả danh sách phân ca theo tháng (mặc định tháng hiện tại nếu thiếu params)."""
@@ -420,15 +422,17 @@ def list_assignments():
 
     with SessionLocal() as s:
         rows = s.query(Assignment).filter(Assignment.day.between(start, end)).all()
-        return jsonify([
-            {
-                "day": r.day.isoformat(),
-                "shift_code": r.shift_code,
-                "staff_id": r.staff_id,
-                "position": r.position,  # PGD | TD | None
-            }
-            for r in rows
-        ])
+        return jsonify(
+            [
+                {
+                    "day": r.day.isoformat(),
+                    "shift_code": r.shift_code,
+                    "staff_id": r.staff_id,
+                    "position": r.position,  # PGD | TD | None
+                }
+                for r in rows
+            ]
+        )
 
 
 @app.get("/api/export_audit")
@@ -451,11 +455,7 @@ def export_audit():
     end = date(y, m, last_day)
 
     with SessionLocal() as s:
-        rows = (
-            s.query(Assignment)
-            .filter(Assignment.day.between(start, end))
-            .all()
-        )
+        rows = s.query(Assignment).filter(Assignment.day.between(start, end)).all()
 
     def generate():
         buf = io.StringIO()
@@ -482,17 +482,12 @@ def export_audit():
             buf.seek(0)
             buf.truncate(0)
 
-    headers = {
-        "Content-Disposition": f"attachment; filename=audit-{y:04d}-{m:02d}.csv"
-    }
+    headers = {"Content-Disposition": f"attachment; filename=audit-{y:04d}-{m:02d}.csv"}
     return Response(
         stream_with_context(generate()),
         content_type="text/csv; charset=utf-8",
         headers=headers,
     )
-
-
-from api.export_month_csv import export_month_csv as _export_month_csv
 
 
 @app.get("/api/export/month.csv")
@@ -504,7 +499,8 @@ def export_month_csv_endpoint():
     if m < 1 or m > 12:
         return {"error": "month must be 1..12"}, 400
     return _export_month_csv(y, m)
-    
+
+
 @app.get("/api/rules/expected")
 def rule_expected():
     today = date.today()
@@ -513,7 +509,7 @@ def rule_expected():
     prof = get_profile()
 
     first = ymd(y, m, 1)
-    last  = ymd(y, m, month_last_day(y, m))
+    last = ymd(y, m, month_last_day(y, m))
 
     out = {}
     d = first
@@ -522,25 +518,29 @@ def rule_expected():
     while d <= last:
         kind = day_kind(d, holidays)
 
-        day = prof.expected_day_counts(kind)      # {"TD": {"K":..,"CA1":..,"CA2":..}, "PGD": {"K":..,"CA2":..}}
-        night = prof.expected_night_counts(kind)  # {"TD": {"Đ": x}, "PGD": {"Đ": y}}  (từ NightDetail.to_engine_dict)
+        day = prof.expected_day_counts(
+            kind
+        )  # {"TD": {"K":..,"CA1":..,"CA2":..}, "PGD": {"K":..,"CA2":..}}
+        night = prof.expected_night_counts(
+            kind
+        )  # {"TD": {"Đ": x}, "PGD": {"Đ": y}}  (từ NightDetail.to_engine_dict)
 
         td = day.get("TD", {})
         pgd = day.get("PGD", {})
-        n_td = (night.get("TD", {}) or {})
-        n_pgd = (night.get("PGD", {}) or {})
+        n_td = night.get("TD", {}) or {}
+        n_pgd = night.get("PGD", {}) or {}
 
         out[d.day] = {
             "expectedTD": {
-                "K":   int(td.get("K", 0)),
+                "K": int(td.get("K", 0)),
                 "CA1": int(td.get("CA1", 0)),
                 "CA2": int(td.get("CA2", 0)),
-                "D":   int(n_td.get("Đ", 0)),   # gộp Đ (đêm @ TD)
+                "D": int(n_td.get("Đ", 0)),  # gộp Đ (đêm @ TD)
             },
             "expectedPGD": {
-                "K":   int(pgd.get("K", 0)),
+                "K": int(pgd.get("K", 0)),
                 "CA2": int(pgd.get("CA2", 0)),
-                "D":   int(n_pgd.get("Đ", 0)),  # gộp Đ (đêm @ PGD)
+                "D": int(n_pgd.get("Đ", 0)),  # gộp Đ (đêm @ PGD)
             },
         }
         d = d + timedelta(days=1)
@@ -557,6 +557,7 @@ def schedule_validate():
         return jsonify({"ok": False, "error": "month must be 1..12"}), 400
     body = validate_month(y, m)
     return jsonify(body)
+
 
 @app.post("/api/schedule/generate")
 def gen():
@@ -581,11 +582,9 @@ def gen():
     print("[API] generate begin", year, month, shuffle, seed, save_flag, fill_hc, flush=True)
 
     try:
-        res = generate_schedule(year, month,
-                                shuffle=shuffle,
-                                seed=seed,
-                                save=save_flag,
-                                fill_hc=fill_hc)
+        res = generate_schedule(
+            year, month, shuffle=shuffle, seed=seed, save=save_flag, fill_hc=fill_hc
+        )
         print("[API] generate end", type(res), flush=True)
         # engine may return a dict or (dict, status)
         if isinstance(res, tuple) and len(res) == 2 and isinstance(res[0], dict):
@@ -598,7 +597,8 @@ def gen():
     except Exception as e:
         # never bubble raw HTML traceback to the frontend
         return jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}), 500
-    
+
+
 # ====== Reset DB ======
 @app.post("/api/admin/reset")
 def admin_reset():
@@ -629,12 +629,14 @@ def admin_reset():
             s.rollback()
             return {"error": str(e)}, 500
 
+
 @app.get("/api/schedule/estimate")
 def api_estimate():
     today = date.today()
     y = request.args.get("year", type=int) or today.year
     m = request.args.get("month", type=int) or today.month
     return jsonify(estimate_month(y, m))
+
 
 if __name__ == "__main__":
     # 5001 đúng theo log bạn đang dùng

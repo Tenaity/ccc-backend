@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-import math, random
+
+import math
+import random
 from datetime import date
+
 from .placements import trackers
 
 CFG = {
@@ -16,8 +19,10 @@ CFG = {
     "night_lock_penalty": 1e6,
 }
 
+
 def _days_gap(prev: date | None, cur: date) -> int:
     return 999 if prev is None else (cur - prev).days
+
 
 def _score(cand, *, d: date, code: str, is_weekend: bool, locked_today: set[int]):
     _last_night, _last_day, _credit, _weekend = trackers()
@@ -47,17 +52,20 @@ def _score(cand, *, d: date, code: str, is_weekend: bool, locked_today: set[int]
         wk_term = wk.get("sat" if d.weekday() == 5 else "sun", 0)
 
     # nhỏ tốt
-    return (-CFG["w_last_night_gap"] * gap_n
-            -CFG["w_recent_day_gap"] * gap_d
-            +CFG["w_credit_balance"] * credit
-            +CFG["w_weekend_balance"] * wk_term)
+    return (
+        -CFG["w_last_night_gap"] * gap_n
+        - CFG["w_recent_day_gap"] * gap_d
+        + CFG["w_credit_balance"] * credit
+        + CFG["w_weekend_balance"] * wk_term
+    )
+
 
 # ---- softmax ổn định số học (subtract-the-max) ----
 def _softmax_choice(scored, rng: random.Random):
     if not scored:
         return None
     scored.sort(key=lambda x: x[1])  # score nhỏ tốt
-    pool = scored[:max(1, CFG["top_k"])]
+    pool = scored[: max(1, CFG["top_k"])]
 
     # ε-greedy trong top-k
     if rng.random() < CFG["epsilon"] and len(pool) > 1:
@@ -81,12 +89,17 @@ def _softmax_choice(scored, rng: random.Random):
             return cand
     return pool[-1][0]
 
+
 def choose(cands, *, d: date, code: str, locked_today: set[int], rng: random.Random):
     is_weekend = d.weekday() >= 5
-    scored = [(c, _score(c, d=d, code=code, is_weekend=is_weekend, locked_today=locked_today)) for c in cands]
+    scored = [
+        (c, _score(c, d=d, code=code, is_weekend=is_weekend, locked_today=locked_today))
+        for c in cands
+    ]
     # loại các ứng viên bị phạt "vô cực" (lock)
     scored = [(c, s) for (c, s) in scored if s < CFG["night_lock_penalty"]]
     return _softmax_choice(scored, rng) if scored else None
+
 
 def choose_relaxed(cands, *, d: date, code: str, locked_today: set[int], rng: random.Random):
     """
@@ -117,9 +130,11 @@ def choose_relaxed(cands, *, d: date, code: str, locked_today: set[int], rng: ra
         if d.weekday() >= 5:
             wk = _weekend.get(cand.id) or {}
             wk_term = wk.get("sat" if d.weekday() == 5 else "sun", 0)
-        return (-CFG["w_recent_day_gap"] * gap_d
-                +CFG["w_credit_balance"] * credit
-                +CFG["w_weekend_balance"] * wk_term)
+        return (
+            -CFG["w_recent_day_gap"] * gap_d
+            + CFG["w_credit_balance"] * credit
+            + CFG["w_weekend_balance"] * wk_term
+        )
 
     scored = [(c, relaxed_score(c)) for c in pool]
     return _softmax_choice(scored, rng) if scored else None

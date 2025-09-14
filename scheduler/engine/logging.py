@@ -1,6 +1,7 @@
+"""Minimal logging helpers for scheduler phases."""
+
 from __future__ import annotations
 
-"""Minimal logging helpers for scheduler phases."""
 from .core import Context
 
 

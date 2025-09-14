@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any, Dict
-from .types import ShiftCode, Position, DayKind, CREDITS
+from typing import Dict
+
+from .types import CREDITS, DayKind, ShiftCode
 
 # UI/REST vẫn dùng các mã ca dạng string
 SHIFT_DEFS = [
@@ -15,8 +17,9 @@ SHIFT_DEFS = [
 ]
 
 # ---- Kiểu cho phần NGÀY ----
-DayTD  = Dict[ShiftCode, int]   # ví dụ: {ShiftCode.K:1, ShiftCode.CA1:2, ShiftCode.CA2:4}
-DayPGD = Dict[ShiftCode, int]   # ví dụ: {ShiftCode.K:1, ShiftCode.CA2:1}
+DayTD = Dict[ShiftCode, int]  # ví dụ: {ShiftCode.K:1, ShiftCode.CA1:2, ShiftCode.CA2:4}
+DayPGD = Dict[ShiftCode, int]  # ví dụ: {ShiftCode.K:1, ShiftCode.CA2:1}
+
 
 @dataclass(frozen=True)
 class DayDetail:
@@ -30,13 +33,15 @@ class DayDetail:
         - KHÔNG còn 'K_leader' hay 'K_WHITE' ở đây; 'leader/K_white' do POSITION quyết định ở engine.
         """
         return {
-            "TD":  {k.value: v for k, v in self.TD.items()},
+            "TD": {k.value: v for k, v in self.TD.items()},
             "PGD": {k.value: v for k, v in self.PGD.items()},
         }
 
+
 # ---- Kiểu cho phần ĐÊM ----
-NightTD  = Dict[ShiftCode, int]   # ví dụ: {ShiftCode.K:1, ShiftCode.CA1:2, ShiftCode.CA2:4}
-NightPGD = Dict[ShiftCode, int]   # ví dụ: {ShiftCode.K:1, ShiftCode.CA2:1}
+NightTD = Dict[ShiftCode, int]  # ví dụ: {ShiftCode.K:1, ShiftCode.CA1:2, ShiftCode.CA2:4}
+NightPGD = Dict[ShiftCode, int]  # ví dụ: {ShiftCode.K:1, ShiftCode.CA2:1}
+
 
 @dataclass(frozen=True)
 class NightDetail:
@@ -50,12 +55,14 @@ class NightDetail:
         - KHÔNG còn 'K_leader' hay 'K_WHITE' ở đây; 'leader/K_white' do POSITION quyết định ở engine.
         """
         return {
-            "TD":  {k.value: v for k, v in self.TD.items()},
+            "TD": {k.value: v for k, v in self.TD.items()},
             "PGD": {k.value: v for k, v in self.PGD.items()},
         }
 
+
 class RuleProfile:
     """Interface chung; mỗi phòng ban triển khai 1 profile."""
+
     name: str = "BASE"
 
     def day_detail(self, kind: DayKind | str) -> DayDetail:
@@ -90,6 +97,7 @@ class RuleProfile:
           "TD":  {"K":1,"Đ":2,},
           "PGD": {"Đ":2}
         }
-        Lưu ý: KHÔNG có "K_WHITE" ở đây (K trắng sẽ do engine quyết định theo POSITION). Đ cũng sẽ quyết dịnh theo position.
+        Lưu ý: KHÔNG có "K_WHITE" ở đây (K trắng sẽ do engine quyết định theo POSITION).
+        Đ cũng sẽ quyết định theo position.
         """
         return self.night_detail(kind).to_engine_dict()

@@ -1,4 +1,3 @@
-import os
 import importlib
 from datetime import date
 
@@ -8,14 +7,17 @@ import pytest
 def setup_module(module):
     pass
 
+
 @pytest.fixture()
 def fresh_db(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
     import models
+
     importlib.reload(models)
     models.init_db()
     import scheduler.validate as validate
+
     importlib.reload(validate)
     return models, validate
 
@@ -24,7 +26,11 @@ def test_offday_vs_fixed_conflict(fresh_db):
     models, validate = fresh_db
     with models.SessionLocal() as s:
         s.add(models.Staff(id=1, full_name="A"))
-        s.add(models.FixedAssignment(staff_id=1, day=date(2025, 9, 4), shift_code="CA1", position="TD"))
+        s.add(
+            models.FixedAssignment(
+                staff_id=1, day=date(2025, 9, 4), shift_code="CA1", position="TD"
+            )
+        )
         s.add(models.OffDay(staff_id=1, day=date(2025, 9, 4)))
         s.commit()
     res = validate.validate_month(2025, 9)
@@ -36,8 +42,14 @@ def test_double_fixed_conflict(fresh_db):
     models, validate = fresh_db
     with models.SessionLocal() as s:
         s.add(models.Staff(id=1, full_name="A"))
-        s.add(models.FixedAssignment(staff_id=1, day=date(2025, 9, 5), shift_code="CA1", position="TD"))
-        s.add(models.FixedAssignment(staff_id=1, day=date(2025, 9, 5), shift_code="K", position="PGD"))
+        s.add(
+            models.FixedAssignment(
+                staff_id=1, day=date(2025, 9, 5), shift_code="CA1", position="TD"
+            )
+        )
+        s.add(
+            models.FixedAssignment(staff_id=1, day=date(2025, 9, 5), shift_code="K", position="PGD")
+        )
         s.commit()
     res = validate.validate_month(2025, 9)
     assert res["conflicts"].get("double_fixed")

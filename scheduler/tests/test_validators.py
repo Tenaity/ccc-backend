@@ -3,8 +3,10 @@ from datetime import date
 from scheduler.placements import Planned
 from scheduler.validators import validate_one_day_leader
 
+
 def test_validate_one_day_leader_exactly_one():
-    first = date(2025,8,1); last = date(2025,8,3)
+    first = date(2025, 8, 1)
+    last = date(2025, 8, 3)
     planned = [
         Planned(day=date(2025, 8, 1), staff_id=1, shift_code="K", position="TD"),
         # day 2: 0 leader

@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from typing import Dict, Set
 from datetime import date, timedelta
+from typing import Dict, Set
 
 from rules.types import ShiftCode
-from .core import Context
 from scheduler.utils import day_kind
-from .utils_rank import ChoiceCtx, fill_ranked_slots, budget_for_day, FairnessWindow
+
+from .core import Context
 from .logging import day_log
+from .utils_rank import ChoiceCtx, FairnessWindow, budget_for_day, fill_ranked_slots
 
 
 def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
@@ -31,14 +32,18 @@ def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
             pos = getattr(r, "position", "TD") or "TD"
             key = (pos, r.shift_code)
             if r.staff_id in locked_today:
-                day_log(ctx, f"{d.isoformat()} [FIX_BLOCK] {r.shift_code}@{pos} #{r.staff_id} locked")
+                day_log(
+                    ctx, f"{d.isoformat()} [FIX_BLOCK] {r.shift_code}@{pos} #{r.staff_id} locked"
+                )
                 fixed_block[key] = fixed_block.get(key, 0) + 1
                 continue
             if r.staff_id in used:
                 day_log(ctx, f"{d.isoformat()} [FIXED] keep {r.shift_code}@{pos} #{r.staff_id}")
                 continue
             if not ctx.can_take(r.staff_id, r.shift_code):
-                day_log(ctx, f"{d.isoformat()} [FIX_BLOCK] {r.shift_code}@{pos} #{r.staff_id} quota")
+                day_log(
+                    ctx, f"{d.isoformat()} [FIX_BLOCK] {r.shift_code}@{pos} #{r.staff_id} quota"
+                )
                 fixed_block[key] = fixed_block.get(key, 0) + 1
                 continue
             ctx.do_place(d, r.staff_id, r.shift_code, pos)
@@ -61,20 +66,52 @@ def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
             elif p.position == "TD" and p.shift_code == ShiftCode.CA2:
                 td_ca2_filled += 1
 
-        k_td_need = max(int(detail.TD.get(ShiftCode.K, 0)) - td_k_filled - fixed_block.get(("TD", ShiftCode.K), 0), 0)
-        pgd_k_need = max(int(detail.PGD.get(ShiftCode.K, 0)) - pgd_k_filled - fixed_block.get(("PGD", ShiftCode.K), 0), 0)
-        pgd_ca2_need = max(int(detail.PGD.get(ShiftCode.CA2, 0)) - pgd_ca2_filled - fixed_block.get(("PGD", ShiftCode.CA2), 0), 0)
-        td_ca1_need = max(int(detail.TD.get(ShiftCode.CA1, 0)) - td_ca1_filled - fixed_block.get(("TD", ShiftCode.CA1), 0), 0)
-        td_ca2_need = max(int(detail.TD.get(ShiftCode.CA2, 0)) - td_ca2_filled - fixed_block.get(("TD", ShiftCode.CA2), 0), 0)
+        k_td_need = max(
+            int(detail.TD.get(ShiftCode.K, 0))
+            - td_k_filled
+            - fixed_block.get(("TD", ShiftCode.K), 0),
+            0,
+        )
+        pgd_k_need = max(
+            int(detail.PGD.get(ShiftCode.K, 0))
+            - pgd_k_filled
+            - fixed_block.get(("PGD", ShiftCode.K), 0),
+            0,
+        )
+        pgd_ca2_need = max(
+            int(detail.PGD.get(ShiftCode.CA2, 0))
+            - pgd_ca2_filled
+            - fixed_block.get(("PGD", ShiftCode.CA2), 0),
+            0,
+        )
+        td_ca1_need = max(
+            int(detail.TD.get(ShiftCode.CA1, 0))
+            - td_ca1_filled
+            - fixed_block.get(("TD", ShiftCode.CA1), 0),
+            0,
+        )
+        td_ca2_need = max(
+            int(detail.TD.get(ShiftCode.CA2, 0))
+            - td_ca2_filled
+            - fixed_block.get(("TD", ShiftCode.CA2), 0),
+            0,
+        )
 
         # ============ 2) TD · K (leader) = từ TC ============
         if k_td_need > 0:
             # Pool TC hợp lệ trong ngày d
             pool_ids_before = [x.id for x in ctx.q_tc_day]
-            pool_tc = [x for x in list(ctx.q_tc_day)
-                       if x.id not in used and x.id not in locked_today]
+            pool_tc = [
+                x for x in list(ctx.q_tc_day) if x.id not in used and x.id not in locked_today
+            ]
 
-            day_log(ctx, f"{d.isoformat()} TD.K need={k_td_need} | TC pool(before)={pool_ids_before} | usable={[x.id for x in pool_tc]}")
+            day_log(
+                ctx,
+                (
+                    f"{d.isoformat()} TD.K need={k_td_need} | "
+                    f"TC pool(before)={pool_ids_before} | usable={[x.id for x in pool_tc]}"
+                ),
+            )
 
             placed_leader = False
             tried = set()
@@ -123,79 +160,109 @@ def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
             if placed_leader:
                 k_td_need = max(k_td_need - 1, 0)
             else:
-                day_log(ctx, f"{d.isoformat()} TD.K leader MISS (usable={ [x.id for x in pool_tc] })")
+                day_log(
+                    ctx, f"{d.isoformat()} TD.K leader MISS (usable={ [x.id for x in pool_tc] })"
+                )
 
         # ============ 3) TD · CA1 ============
         if td_ca1_need > 0:
             budget = budget_for_day(d, "TD.CA1", td_ca1_need)
             cc = ChoiceCtx(d=d, code="CA1", locked_today=locked_today, used=used, ctx=ctx)
-            ids = fill_ranked_slots(need=td_ca1_need,
-                                    pool_top1=ctx.q_gdv1,
-                                    pool_top2=ctx.q_gdv2,
-                                    cc=cc,
-                                    fairness=fair,
-                                    position="TD",
-                                    want=budget)
+            ids = fill_ranked_slots(
+                need=td_ca1_need,
+                pool_top1=ctx.q_gdv1,
+                pool_top2=ctx.q_gdv2,
+                cc=cc,
+                fairness=fair,
+                position="TD",
+                want=budget,
+            )
             for sid in ids:
                 ctx.do_place(d, sid, "CA1", "TD")
                 day_log(ctx, f"{d.isoformat()} TD.CA1 -> #{sid}")
             got1, got2 = fair.today_for("CA1", "TD")
             win1, win2 = fair.summary("CA1", "TD")
-            print(f"[FAIR] {d.isoformat()} TD.CA1 want r1={budget[1]} r2={budget[2]} | got r1={got1} r2={got2} | window7 r1={win1} r2={win2}")
+            print(
+                (
+                    f"[FAIR] {d.isoformat()} TD.CA1 want r1={budget[1]} r2={budget[2]} | "
+                    f"got r1={got1} r2={got2} | window7 r1={win1} r2={win2}"
+                )
+            )
 
         # ============ 4) TD · CA2 ============
         if td_ca2_need > 0:
             budget = budget_for_day(d, "TD.CA2", td_ca2_need)
             cc = ChoiceCtx(d=d, code="CA2", locked_today=locked_today, used=used, ctx=ctx)
-            ids = fill_ranked_slots(need=td_ca2_need,
-                                    pool_top1=ctx.q_gdv1,
-                                    pool_top2=ctx.q_gdv2,
-                                    cc=cc,
-                                    fairness=fair,
-                                    position="TD",
-                                    want=budget)
+            ids = fill_ranked_slots(
+                need=td_ca2_need,
+                pool_top1=ctx.q_gdv1,
+                pool_top2=ctx.q_gdv2,
+                cc=cc,
+                fairness=fair,
+                position="TD",
+                want=budget,
+            )
             for sid in ids:
                 ctx.do_place(d, sid, "CA2", "TD")
                 day_log(ctx, f"{d.isoformat()} TD.CA2 -> #{sid}")
             got1, got2 = fair.today_for("CA2", "TD")
             win1, win2 = fair.summary("CA2", "TD")
-            print(f"[FAIR] {d.isoformat()} TD.CA2 want r1={budget[1]} r2={budget[2]} | got r1={got1} r2={got2} | window7 r1={win1} r2={win2}")
+            print(
+                (
+                    f"[FAIR] {d.isoformat()} TD.CA2 want r1={budget[1]} r2={budget[2]} | "
+                    f"got r1={got1} r2={got2} | window7 r1={win1} r2={win2}"
+                )
+            )
 
         # ============ 5) PGD · K (đỏ) ============
         if pgd_k_need > 0:
             budget = budget_for_day(d, "PGD.K", pgd_k_need)
             cc = ChoiceCtx(d=d, code="K", locked_today=locked_today, used=used, ctx=ctx)
-            ids = fill_ranked_slots(need=pgd_k_need,
-                                    pool_top1=ctx.q_gdv1,
-                                    pool_top2=ctx.q_gdv2,
-                                    cc=cc,
-                                    fairness=fair,
-                                    position="PGD",
-                                    want=budget)
+            ids = fill_ranked_slots(
+                need=pgd_k_need,
+                pool_top1=ctx.q_gdv1,
+                pool_top2=ctx.q_gdv2,
+                cc=cc,
+                fairness=fair,
+                position="PGD",
+                want=budget,
+            )
             for sid in ids:
                 ctx.do_place(d, sid, "K", "PGD")
                 day_log(ctx, f"{d.isoformat()} PGD.K -> #{sid}")
             got1, got2 = fair.today_for("K", "PGD")
             win1, win2 = fair.summary("K", "PGD")
-            print(f"[FAIR] {d.isoformat()} PGD.K want r1={budget[1]} r2={budget[2]} | got r1={got1} r2={got2} | window7 r1={win1} r2={win2}")
+            print(
+                (
+                    f"[FAIR] {d.isoformat()} PGD.K want r1={budget[1]} r2={budget[2]} | "
+                    f"got r1={got1} r2={got2} | window7 r1={win1} r2={win2}"
+                )
+            )
 
         # ============ 6) PGD · CA2 ============
         if pgd_ca2_need > 0:
             budget = budget_for_day(d, "PGD.CA2", pgd_ca2_need)
             cc = ChoiceCtx(d=d, code="CA2", locked_today=locked_today, used=used, ctx=ctx)
-            ids = fill_ranked_slots(need=pgd_ca2_need,
-                                    pool_top1=ctx.q_gdv1,
-                                    pool_top2=ctx.q_gdv2,
-                                    cc=cc,
-                                    fairness=fair,
-                                    position="PGD",
-                                    want=budget)
+            ids = fill_ranked_slots(
+                need=pgd_ca2_need,
+                pool_top1=ctx.q_gdv1,
+                pool_top2=ctx.q_gdv2,
+                cc=cc,
+                fairness=fair,
+                position="PGD",
+                want=budget,
+            )
             for sid in ids:
                 ctx.do_place(d, sid, "CA2", "PGD")
                 day_log(ctx, f"{d.isoformat()} PGD.CA2 -> #{sid}")
             got1, got2 = fair.today_for("CA2", "PGD")
             win1, win2 = fair.summary("CA2", "PGD")
-            print(f"[FAIR] {d.isoformat()} PGD.CA2 want r1={budget[1]} r2={budget[2]} | got r1={got1} r2={got2} | window7 r1={win1} r2={win2}")
+            print(
+                (
+                    f"[FAIR] {d.isoformat()} PGD.CA2 want r1={budget[1]} r2={budget[2]} | "
+                    f"got r1={got1} r2={got2} | window7 r1={win1} r2={win2}"
+                )
+            )
 
         if ctx.save:
             ctx.session.commit()
@@ -206,7 +273,9 @@ def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
         td_ca2 = int(detail.TD.get(ShiftCode.CA2, 0))
         pgd_k = int(detail.PGD.get(ShiftCode.K, 0))
         pgd_ca2 = int(detail.PGD.get(ShiftCode.CA2, 0))
-        day_log(ctx, f"summary {d.isoformat()} | TD: K={td_k} CA1={td_ca1} CA2={td_ca2} | PGD: K={pgd_k} CA2={pgd_ca2}")
+        day_log(
+            ctx,
+            f"summary {d.isoformat()} | TD: K={td_k} CA1={td_ca1} CA2={td_ca2} | PGD: K={pgd_k} CA2={pgd_ca2}",
+        )
 
         d += timedelta(days=1)
-
