@@ -1,25 +1,30 @@
 # backend/scheduler/balancer.py
 from __future__ import annotations
-from dataclasses import dataclass
-from datetime import date, timedelta
+
 import calendar
 import heapq
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple, Protocol
+from dataclasses import dataclass
+from datetime import date, timedelta
+from typing import Dict, Iterable, List, Optional, Protocol, Sequence, Set, Tuple
 
 Placement = Tuple[date, int, str, str]  # (day, staff_id, shift_code, position)
+
 
 class StaffLike(Protocol):
     id: int
     base_quota: float
+
 
 @dataclass(frozen=True)
 class HCPlacement:
     day: date
     staff_id: int
 
+
 def _days_in_month(year: int, month: int) -> List[date]:
     last = calendar.monthrange(year, month)[1]
     return [date(year, month, d) for d in range(1, last + 1)]
+
 
 def balance_hc(
     *,
@@ -56,7 +61,7 @@ def balance_hc(
     locked2: Dict[date, Set[int]] = {d: set(v) for d, v in locked_by_day.items()}
 
     if planned:
-        for (d, sid, code, _pos) in planned:
+        for d, sid, code, _pos in planned:
             if d.year == year and d.month == month:
                 # cộng công đã xếp
                 current_credit[sid] = current_credit.get(sid, 0.0) + float(credits.get(code, 0.0))
@@ -69,7 +74,11 @@ def balance_hc(
     can_work: Dict[date, Set[int]] = {}
     for d in days:
         locked = locked2.get(d, set())
-        can_work[d] = {sid for sid in base_quota.keys() if sid not in locked and sid not in taken_today.get(d, set())}
+        can_work[d] = {
+            sid
+            for sid in base_quota.keys()
+            if sid not in locked and sid not in taken_today.get(d, set())
+        }
 
     # 3) heap theo deficit (max-heap bằng cách đẩy âm vào heapq)
     def deficit_of(sid: int) -> float:

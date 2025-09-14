@@ -1,18 +1,21 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-from collections import defaultdict
-from datetime import timedelta, date  # ⬅️ thêm date
-from typing import Dict, List, Tuple
 
-from .core import build_context, close_context, TOLERANCE
-from .phase_night import run_phase_night
-from .phase_day import run_phase_day
-from ..balancer import balance_hc
-from ..placements import reset_trackers, exp_planned, place, set_fairness_hook
-from .utils_rank import FairnessWindow
-from ..validators import validate_one_day_leader
+from collections import defaultdict
+from datetime import date, timedelta  # ⬅️ thêm date
+from typing import Dict, List
+
 from rules import get_profile  # ⬅️ để lấy expected nếu cần đối chiếu nhanh
 from scheduler.utils import day_kind  # ⬅️ dùng khi đối chiếu expected từng ngày
+
+from ..balancer import balance_hc
+from ..placements import exp_planned, place, reset_trackers, set_fairness_hook
+from ..validators import validate_one_day_leader
+from .core import TOLERANCE, build_context, close_context
+from .phase_day import run_phase_day
+from .phase_night import run_phase_night
+from .utils_rank import FairnessWindow
+
 
 def schedule_month(
     year: int,
@@ -23,7 +26,9 @@ def schedule_month(
     save: bool = False,
     fill_hc: bool = False,
 ):
-    print(f"[ENGINE] start y={year} m={month} shuffle={shuffle} seed={seed} save={save} fill_hc={fill_hc}")
+    print(
+        f"[ENGINE] start y={year} m={month} shuffle={shuffle} seed={seed} save={save} fill_hc={fill_hc}"
+    )
     reset_trackers()
 
     ctx, first, last = build_context(year=year, month=month, shuffle=shuffle, seed=seed, save=save)
@@ -56,9 +61,13 @@ def schedule_month(
 
         # (1) NIGHT
         print("[ENGINE] phase1: NIGHT")
-        night_miss: List[date] = run_phase_night(ctx, first, last, fair) or []   # ⬅️ rõ type
+        night_miss: List[date] = run_phase_night(ctx, first, last, fair) or []  # ⬅️ rõ type
         if night_miss:
-            print("[ENGINE] NIGHT_MISS (no night leader):", [x.isoformat() for x in night_miss[:10]], "…")
+            print(
+                "[ENGINE] NIGHT_MISS (no night leader):",
+                [x.isoformat() for x in night_miss[:10]],
+                "…",
+            )
 
         # (2) DAY
         print("[ENGINE] phase2: DAY")
@@ -97,8 +106,16 @@ def schedule_month(
                     print("[BALANCER] Không thể bù hết do thiếu ngày hợp lệ:", leftovers[:10], "…")
 
             applied = 0
-            for d0, sid0, code0, pos0 in (proposals or []):
-                place(ctx.session, ctx._planned, day=d0, staff_id=sid0, code=code0, position=pos0, save=ctx.save)
+            for d0, sid0, code0, pos0 in proposals or []:
+                place(
+                    ctx.session,
+                    ctx._planned,
+                    day=d0,
+                    staff_id=sid0,
+                    code=code0,
+                    position=pos0,
+                    save=ctx.save,
+                )
                 applied += 1
             if ctx.save:
                 ctx.session.commit()
@@ -123,8 +140,8 @@ def schedule_month(
             d = first
             while d <= last:
                 kind = day_kind(d, ctx.holidays)
-                exp_day = prof.expected_day_counts(kind)         # {"TD":{"K":...},"PGD":{"K":...,"CA2":...}}
-                exp_night = prof.expected_night_counts(kind)     # {"TD":{"Đ":...}, "PGD":{"Đ":...}}
+                prof.expected_day_counts(kind)  # {"TD":{"K":...},"PGD":{"K":...,"CA2":...}}
+                prof.expected_night_counts(kind)  # {"TD":{"Đ":...}, "PGD":{"Đ":...}}
                 # Bạn có thể thêm bộ đếm thực tế theo ngày ở đây (nếu cần)
                 d += timedelta(days=1)
         except Exception:

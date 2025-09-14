@@ -1,6 +1,5 @@
-from datetime import date
 import re
-import pytest
+from datetime import date
 
 from models import OffDay
 from scheduler.engine.phase_night import run_phase_night
@@ -23,7 +22,11 @@ def test_single_leader_per_night(session, capsys):
     assert miss == []
     assigns = [p for p in ctx._planned if p.day == d]
     staff_map = {s.id: s for s in ctx.TC + ctx.GDV1 + ctx.GDV2}
-    tc_leaders = [a for a in assigns if a.shift_code == "Đ" and a.position == "TD" and staff_map[a.staff_id].role == "TC"]
+    tc_leaders = [
+        a
+        for a in assigns
+        if a.shift_code == "Đ" and a.position == "TD" and staff_map[a.staff_id].role == "TC"
+    ]
     assert len(tc_leaders) == 1
     out = capsys.readouterr().out
     assert re.search(rf"summary {d.isoformat()} \| leader=\d+ \| TD.D=", out)
@@ -38,7 +41,11 @@ def test_no_double_night_leader(session):
     run_phase_night(ctx, d, d, _fairness(ctx))
     assigns = [p for p in ctx._planned if p.day == d]
     staff_map = {s.id: s for s in ctx.TC + ctx.GDV1 + ctx.GDV2}
-    tc_leaders = [a for a in assigns if a.shift_code == "Đ" and a.position == "TD" and staff_map[a.staff_id].role == "TC"]
+    tc_leaders = [
+        a
+        for a in assigns
+        if a.shift_code == "Đ" and a.position == "TD" and staff_map[a.staff_id].role == "TC"
+    ]
     assert len(tc_leaders) == 1
 
 

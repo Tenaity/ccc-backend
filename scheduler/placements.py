@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import date
 from typing import Dict, List, Optional, Tuple, cast
 
@@ -18,8 +18,8 @@ from rules import CREDIT as RULE_CREDIT
 class Planned:
     day: date
     staff_id: int
-    shift_code: str                 # "CA1" | "CA2" | "K" | "HC" | "Đ" | "P"
-    position: Optional[str]         # "TD" | "PGD" | "K_WHITE" | "D_WHITE" | None
+    shift_code: str  # "CA1" | "CA2" | "K" | "HC" | "Đ" | "P"
+    position: Optional[str]  # "TD" | "PGD" | "K_WHITE" | "D_WHITE" | None
 
 
 # ====== Trackers runtime (chỉ sống trong 1 phiên generate) ======
@@ -110,7 +110,9 @@ def exp_planned(planned: List[Planned]) -> List[dict]:
     return [asdict(p) | {"day": p.day.isoformat()} for p in planned]
 
 
-def trackers() -> Tuple[Dict[int, date], Dict[int, date], Dict[int, float], Dict[int, Dict[str, int]]]:
+def trackers() -> (
+    Tuple[Dict[int, date], Dict[int, date], Dict[int, float], Dict[int, Dict[str, int]]]
+):
     """
     Cho randomize/engine mượn các tracker nội bộ khi cần:
       - _last_night: id -> ngày gần nhất làm Đ

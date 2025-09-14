@@ -1,8 +1,8 @@
 import csv
-import io
 import importlib
-from datetime import date
+import io
 import json
+from datetime import date
 
 import pytest
 
@@ -11,8 +11,9 @@ import pytest
 def client(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
-    import models
     import app as app_module
+    import models
+
     importlib.reload(models)
     models.init_db()
     importlib.reload(app_module)

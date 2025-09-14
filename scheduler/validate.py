@@ -1,14 +1,15 @@
 """Utilities to validate pre-booked shifts and off days for a month."""
+
 from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, timedelta
 from typing import DefaultDict, Dict, List
 
-from models import SessionLocal, FixedAssignment, OffDay, Assignment, Staff
-from scheduler.repo import load_holidays
-from scheduler.utils import ymd, month_last_day, day_kind
+from models import Assignment, FixedAssignment, OffDay, SessionLocal, Staff
 from rules import get_profile
+from scheduler.repo import load_holidays
+from scheduler.utils import day_kind, month_last_day, ymd
 
 
 def validate_month(year: int, month: int) -> Dict[str, object]:
@@ -22,16 +23,8 @@ def validate_month(year: int, month: int) -> Dict[str, object]:
     conflicts: DefaultDict[str, List[Dict[str, object]]] = defaultdict(list)
 
     with SessionLocal() as s:
-        fixed_rows = (
-            s.query(FixedAssignment)
-            .filter(FixedAssignment.day.between(first, last))
-            .all()
-        )
-        off_rows = (
-            s.query(OffDay)
-            .filter(OffDay.day.between(first, last))
-            .all()
-        )
+        fixed_rows = s.query(FixedAssignment).filter(FixedAssignment.day.between(first, last)).all()
+        off_rows = s.query(OffDay).filter(OffDay.day.between(first, last)).all()
         assign_rows = (
             s.query(
                 Assignment.day,
@@ -127,8 +120,7 @@ def validate_month(year: int, month: int) -> Dict[str, object]:
             conflicts["leader_night_dup"].append({"day": day.isoformat(), "ids": ids})
 
     assign_set = {
-        (day, staff_id, code, (pos or "TD"))
-        for day, staff_id, code, pos, _ in assign_rows
+        (day, staff_id, code, (pos or "TD")) for day, staff_id, code, pos, _ in assign_rows
     }
     for r in fixed_rows:
         pos = getattr(r, "position", "TD") or "TD"

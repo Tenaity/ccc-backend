@@ -1,9 +1,11 @@
 # backend/seed.py
 # -*- coding: utf-8 -*-
 from __future__ import annotations
+
 import re
 from typing import Optional
-from models import init_db, SessionLocal, Staff
+
+from models import SessionLocal, Staff, init_db
 
 # =========================
 #  DANH SÁCH NHÂN SỰ
@@ -97,6 +99,7 @@ CODE_MAP: dict[str, int] = {
 # =========================
 TAG_RE = re.compile(r"\[(\w+):([^\]]+)\]")
 
+
 def set_tag(notes: Optional[str], key: str, value: Optional[str]) -> Optional[str]:
     """
     - Nếu value=None -> xoá tag key khỏi notes.
@@ -122,35 +125,46 @@ def set_tag(notes: Optional[str], key: str, value: Optional[str]) -> Optional[st
     final = (text_only + " " + tags_only).strip()
     return final or None
 
+
 # =========================
 #  Upsert
 # =========================
-def upsert_staff(full_name: str, role: str, *, can_night=True, base_quota=26.0, notes: Optional[str]=None):
+def upsert_staff(
+    full_name: str, role: str, *, can_night=True, base_quota=26.0, notes: Optional[str] = None
+):
     with SessionLocal() as s:
         r = s.query(Staff).filter_by(full_name=full_name).first()
         if r:
             changed = False
             if r.role != role:
-                r.role = role; changed = True
+                r.role = role
+                changed = True
             if bool(r.can_night) != bool(can_night):
-                r.can_night = bool(can_night); changed = True
+                r.can_night = bool(can_night)
+                changed = True
             old_notes = r.notes or ""
             new_notes = notes or old_notes
             if old_notes != new_notes:
-                r.notes = new_notes; changed = True
+                r.notes = new_notes
+                changed = True
             if float(r.base_quota) != float(base_quota):
-                r.base_quota = float(base_quota); changed = True
+                r.base_quota = float(base_quota)
+                changed = True
             if changed:
-                s.add(r); s.commit()
+                s.add(r)
+                s.commit()
         else:
-            s.add(Staff(
-                full_name=full_name,
-                role=role,
-                can_night=bool(can_night),
-                base_quota=float(base_quota),
-                notes=notes,
-            ))
+            s.add(
+                Staff(
+                    full_name=full_name,
+                    role=role,
+                    can_night=bool(can_night),
+                    base_quota=float(base_quota),
+                    notes=notes,
+                )
+            )
             s.commit()
+
 
 # =========================
 #  Seed
@@ -198,6 +212,7 @@ def run():
             notes = set_tag(notes, "CODE", str(code))
 
         upsert_staff(name, role="GDV", can_night=can_night, base_quota=base_quota, notes=notes)
+
 
 if __name__ == "__main__":
     run()
