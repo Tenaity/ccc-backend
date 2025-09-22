@@ -12,7 +12,7 @@ from flask_cors import CORS
 from sqlalchemy import select, text
 
 from api.export_month_csv import export_month_csv as _export_month_csv
-from models import Assignment, FixedAssignment, OffDay, SessionLocal, Staff, init_db
+from models import Assignment, FixedAssignment, Holiday, OffDay, SessionLocal, Staff, init_db
 from rules import SHIFT_DEFS, get_profile
 from scheduler import schedule_month as generate_schedule
 from scheduler.estimator import estimate_month
@@ -381,6 +381,97 @@ def delete_off_day(off_id: int):
             if not r:
                 return {"error": "Not found"}, 404
             s.delete(r)
+            s.commit()
+            return {"ok": True}
+    except Exception as e:
+        return (
+            jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}),
+            500,
+        )
+
+
+# ---------- Holidays ----------
+@app.get("/api/holidays")
+def list_holidays():
+    """List holidays for a given month (defaults to current)."""
+    today = date.today()
+    y = request.args.get("year", type=int) or today.year
+    m = request.args.get("month", type=int) or today.month
+
+    if m < 1 or m > 12:
+        return {"error": "month must be 1..12"}, 400
+
+    last_day = calendar.monthrange(y, m)[1]
+    start = date(y, m, 1)
+    end = date(y, m, last_day)
+
+    try:
+        with SessionLocal() as s:
+            rows = (
+                s.query(Holiday)
+                .filter(Holiday.day.between(start, end))
+                .order_by(Holiday.day.asc())
+                .all()
+            )
+            return jsonify(
+                [
+                    {
+                        "id": row.id,
+                        "day": row.day.isoformat(),
+                        "name": row.name,
+                    }
+                    for row in rows
+                ]
+            )
+    except Exception as e:
+        return (
+            jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}),
+            500,
+        )
+
+
+@app.post("/api/holidays")
+def create_holiday():
+    data = request.get_json(force=True) or {}
+    day_str = data.get("day")
+    name = data.get("name")
+
+    if not day_str:
+        return {"error": "day required"}, 400
+
+    try:
+        d = date.fromisoformat(day_str)
+    except Exception:
+        return {"error": "day must be YYYY-MM-DD"}, 400
+
+    try:
+        with SessionLocal() as s:
+            existing = s.query(Holiday).filter(Holiday.day == d).first()
+            if existing:
+                item = {"id": existing.id, "day": existing.day.isoformat(), "name": existing.name}
+                return {"ok": True, "item": item}
+
+            holiday = Holiday(day=d, name=name)
+            s.add(holiday)
+            s.commit()
+            s.refresh(holiday)
+            item = {"id": holiday.id, "day": holiday.day.isoformat(), "name": holiday.name}
+            return {"ok": True, "item": item}, 201
+    except Exception as e:
+        return (
+            jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}),
+            500,
+        )
+
+
+@app.delete("/api/holidays/<int:holiday_id>")
+def delete_holiday(holiday_id: int):
+    try:
+        with SessionLocal() as s:
+            row = s.get(Holiday, holiday_id)
+            if not row:
+                return {"error": "Not found"}, 404
+            s.delete(row)
             s.commit()
             return {"ok": True}
     except Exception as e:
