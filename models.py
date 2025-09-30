@@ -21,7 +21,21 @@ from sqlalchemy.orm import (
     sessionmaker,
 )
 
-DB_URL = os.getenv("DB_URL", "sqlite:///./cskh.db")
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DEFAULT_DB_URL = "sqlite:///instance/app.sqlite"
+legacy_db_url = os.getenv("DB_URL")
+db_url = os.getenv("DATABASE_URL")
+DB_URL = legacy_db_url or db_url or DEFAULT_DB_URL
+
+if DB_URL.startswith("sqlite:///"):
+    db_file = DB_URL.replace("sqlite:///", "", 1)
+    if db_file and db_file != ":memory:":
+        abs_path = os.path.abspath(db_file)
+        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+
 engine = create_engine(DB_URL, echo=False, future=True)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 Base = declarative_base()

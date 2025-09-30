@@ -11,8 +11,12 @@ from flask import Flask, Response, jsonify, request, send_from_directory, stream
 from flask_cors import CORS
 from sqlalchemy import select, text
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from api.export_month_csv import export_month_csv as _export_month_csv
-from models import Assignment, FixedAssignment, Holiday, OffDay, SessionLocal, Staff, init_db
+from models import Assignment, FixedAssignment, Holiday, OffDay, SessionLocal, Staff, engine, init_db
 from rules import SHIFT_DEFS, get_profile
 from scheduler import schedule_month as generate_schedule
 from scheduler.estimator import estimate_month
@@ -21,15 +25,29 @@ from scheduler.utils import day_kind, month_last_day, ymd
 from scheduler.validate import validate_month
 
 # Trỏ tới thư mục build của frontend (Vite) nếu đã build
-FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
-DB_FILE = pathlib.Path(os.path.join(os.path.dirname(__file__), "cskh.db"))
+BASE_DIR = pathlib.Path(__file__).parent
+DEFAULT_FRONTEND_DIST = BASE_DIR.parent / "frontend" / "dist"
+frontend_override = os.getenv("FRONTEND_DIST")
+frontend_path = pathlib.Path(frontend_override).expanduser() if frontend_override else DEFAULT_FRONTEND_DIST
+frontend_static = str(frontend_path.resolve()) if frontend_path.exists() else None
+
+db_path = pathlib.Path(engine.url.database).expanduser() if engine.url.database else None
+if db_path and not db_path.is_absolute():
+    db_path = (pathlib.Path.cwd() / db_path).resolve()
+DB_FILE = db_path
 
 app = Flask(
     __name__,
-    static_folder=FRONTEND_DIST if os.path.isdir(FRONTEND_DIST) else None,
+    static_folder=frontend_static,
     static_url_path="/",
 )
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+cors_raw = os.getenv("CORS_ORIGINS", "*")
+cors_origins = [item.strip() for item in cors_raw.split(",") if item.strip()]
+CORS(app, origins=cors_origins or ["*"], supports_credentials=True)
+
+APP_HOST = os.getenv("HOST", "0.0.0.0")
+APP_PORT = int(os.getenv("PORT", "8000"))
+APP_DEBUG = os.getenv("APP_ENV", "local").lower() != "production"
 
 # Khởi tạo DB (tạo bảng nếu chưa có)
 init_db()
@@ -703,7 +721,7 @@ def admin_reset():
 
     if mode == "hard":
         try:
-            if DB_FILE.exists():
+            if DB_FILE and DB_FILE.exists():
                 DB_FILE.unlink()
             init_db()  # tạo lại schema rỗng
             return {"ok": True, "mode": "hard"}
@@ -730,5 +748,4 @@ def api_estimate():
 
 
 if __name__ == "__main__":
-    # 5001 đúng theo log bạn đang dùng
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    app.run(host=APP_HOST, port=APP_PORT, debug=APP_DEBUG)

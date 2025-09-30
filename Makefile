@@ -2,13 +2,13 @@
 
 venv:
 	test -d .venv || python3 -m venv .venv
+	.venv/bin/pip install --upgrade pip
+	.venv/bin/pip install -r requirements-dev.txt
 
 piptools:
 	:
 
 install: venv
-	.venv/bin/pip install -r requirements.txt
-	-.venv/bin/pip install -r requirements-dev.txt
 
 migrate:
 	.venv/bin/python -c "from models import init_db; init_db()"
