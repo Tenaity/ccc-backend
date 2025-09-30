@@ -2,6 +2,7 @@
 import os
 from datetime import date
 from typing import List, Optional
+from urllib.parse import quote_plus
 
 from sqlalchemy import (
     Boolean,
@@ -12,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     create_engine,
+    inspect,
 )
 from sqlalchemy.orm import (
     Mapped,
@@ -25,10 +27,47 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DEFAULT_DB_URL = "sqlite:///instance/app.sqlite"
-legacy_db_url = os.getenv("DB_URL")
-db_url = os.getenv("DATABASE_URL")
-DB_URL = legacy_db_url or db_url or DEFAULT_DB_URL
+DB_URL_ENV = os.getenv("DATABASE_URL") or os.getenv("DB_URL")
+
+if DB_URL_ENV:
+    DB_URL = DB_URL_ENV
+else:
+    cfg = {
+        "DB_HOST": os.getenv("DB_HOST"),
+        "DB_PORT": os.getenv("DB_PORT"),
+        "DB_NAME": os.getenv("DB_NAME"),
+        "DB_USER": os.getenv("DB_USER"),
+        "DB_PASSWORD": os.getenv("DB_PASSWORD"),
+    }
+    missing = [key for key, value in cfg.items() if not value]
+    if missing:
+        joined = ", ".join(missing)
+        raise RuntimeError(
+            "Missing database configuration for: " + joined
+        )
+
+    tz = os.getenv("DB_TIMEZONE")
+    opts = os.getenv("DB_OPTIONS")
+
+    user = quote_plus(cfg["DB_USER"])
+    password = quote_plus(cfg["DB_PASSWORD"])
+    base = (
+        f"postgresql+psycopg://{user}:{password}"
+        f"@{cfg['DB_HOST']}:{cfg['DB_PORT']}/{cfg['DB_NAME']}"
+    )
+
+    query_parts = []
+    if opts:
+        opt_payload = opts.lstrip("?")
+        if opt_payload:
+            query_parts.append(opt_payload)
+    if tz:
+        query_parts.append(f"options={quote_plus(f'-c TimeZone={tz}')}")
+
+    if query_parts:
+        DB_URL = f"{base}?{'&'.join(query_parts)}"
+    else:
+        DB_URL = base
 
 if DB_URL.startswith("sqlite:///"):
     db_file = DB_URL.replace("sqlite:///", "", 1)
@@ -95,19 +134,26 @@ class Holiday(Base):
 
 
 def init_db():
-    """Create tables and migrate legacy databases.
+    """Create tables and run lightweight migrations.
 
-    SQLite does not support ``ALTER TABLE`` in ``create_all``. Existing
-    deployments may therefore miss newly added columns. This helper creates
-    tables for fresh databases and, for pre-existing ones, ensures the
-    ``fixed_assignment`` table contains the ``position`` column.
+    Ensures the ``fixed_assignment`` table always has the ``position`` column,
+    even for databases created before the column was introduced.
     """
     Base.metadata.create_all(engine)
 
     # --- Migration: add ``position`` column if missing ---
-    with engine.connect() as conn:
-        res = conn.exec_driver_sql("PRAGMA table_info('fixed_assignment')").fetchall()
-        cols = {row[1] for row in res}
-        if "position" not in cols:
-            conn.exec_driver_sql("ALTER TABLE fixed_assignment ADD COLUMN position VARCHAR NULL")
-        conn.commit()
+    insp = inspect(engine)
+    try:
+        tables = set(insp.get_table_names())
+    except Exception:
+        return
+
+    if "fixed_assignment" not in tables:
+        return
+
+    cols = {col["name"] for col in insp.get_columns("fixed_assignment")}
+    if "position" not in cols:
+        with engine.begin() as conn:
+            conn.exec_driver_sql(
+                "ALTER TABLE fixed_assignment ADD COLUMN position VARCHAR NULL"
+            )

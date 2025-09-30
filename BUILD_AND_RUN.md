@@ -6,7 +6,7 @@
 
 ## Environment
 1. Copy `.env.example` to `.env`
-2. Update `DATABASE_URL` if you do not want to use the default SQLite file under `instance/`
+2. Fill in the `DB_*` variables (host, port, name, user, password, timezone, optional options) or set `DATABASE_URL` directly if you prefer a custom connection string.
 
 ## Commands
 All helper commands are provided via `Makefile`:
