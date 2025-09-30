@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 import random
 from datetime import date
+from typing import Optional, Set
 
 from .placements import trackers
 
@@ -20,11 +21,11 @@ CFG = {
 }
 
 
-def _days_gap(prev: date | None, cur: date) -> int:
+def _days_gap(prev: Optional[date], cur: date) -> int:
     return 999 if prev is None else (cur - prev).days
 
 
-def _score(cand, *, d: date, code: str, is_weekend: bool, locked_today: set[int]):
+def _score(cand, *, d: date, code: str, is_weekend: bool, locked_today: Set[int]):
     _last_night, _last_day, _credit, _weekend = trackers()
 
     # hard locks
@@ -90,7 +91,7 @@ def _softmax_choice(scored, rng: random.Random):
     return pool[-1][0]
 
 
-def choose(cands, *, d: date, code: str, locked_today: set[int], rng: random.Random):
+def choose(cands, *, d: date, code: str, locked_today: Set[int], rng: random.Random):
     is_weekend = d.weekday() >= 5
     scored = [
         (c, _score(c, d=d, code=code, is_weekend=is_weekend, locked_today=locked_today))
@@ -101,7 +102,7 @@ def choose(cands, *, d: date, code: str, locked_today: set[int], rng: random.Ran
     return _softmax_choice(scored, rng) if scored else None
 
 
-def choose_relaxed(cands, *, d: date, code: str, locked_today: set[int], rng: random.Random):
+def choose_relaxed(cands, *, d: date, code: str, locked_today: Set[int], rng: random.Random):
     """
     Fallback: khi pool chuẩn rỗng.
     - Vẫn tôn trọng: locked_today (OffDay) & can_night (nếu code == "Đ")

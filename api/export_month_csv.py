@@ -3,6 +3,7 @@ import csv
 import io
 import re
 from datetime import date
+from typing import Optional
 
 from flask import Response, stream_with_context
 
@@ -21,7 +22,7 @@ SHIFT_CREDIT = {
 _RANK_RE = re.compile(r"\[RANK:(1|2)\]")
 
 
-def _extract_rank(notes: str | None) -> str:
+def _extract_rank(notes: Optional[str]) -> str:
     """Extract rank from staff notes."""
     if not notes:
         return ""

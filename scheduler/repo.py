@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from typing import List
+from typing import List, Optional
 
 from sqlalchemy import select
 
@@ -11,7 +11,7 @@ from models import FixedAssignment, Holiday, OffDay, Staff
 
 
 # ---------- helpers ----------
-def _parse_rank(notes: str | None) -> int | None:
+def _parse_rank(notes: Optional[str]) -> Optional[int]:
     if not notes:
         return None
     m = re.search(r"\[RANK:(\d+)\]", notes)
@@ -21,7 +21,7 @@ def _parse_rank(notes: str | None) -> int | None:
         return None
 
 
-def _is_maternity(notes: str | None) -> bool:
+def _is_maternity(notes: Optional[str]) -> bool:
     return bool(notes and "nghỉ sinh" in notes.lower())
 
 

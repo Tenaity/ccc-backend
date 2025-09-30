@@ -5,6 +5,7 @@ import random
 import types
 from collections import deque
 from datetime import date
+from typing import Optional, Set
 
 import pytest
 
@@ -54,7 +55,7 @@ class FakeCtx:
     def can_take(self, staff_id: int, code: str) -> bool:  # pragma: no cover - simple stub
         return True
 
-    def do_place(self, d: date, staff_id: int, code: str, position: str | None):
+    def do_place(self, d: date, staff_id: int, code: str, position: Optional[str]):
         self._planned.append(_Planned(d, staff_id, code, position))
 
     def session_commit(self):  # pragma: no cover - not used
@@ -73,7 +74,7 @@ def the_day():
     return date(2025, 9, 1)
 
 
-def _count_leaders(ctx: FakeCtx, the_day: date, tc_set: set[int]):
+def _count_leaders(ctx: FakeCtx, the_day: date, tc_set: Set[int]):
     leaders = [
         p
         for p in ctx._planned
