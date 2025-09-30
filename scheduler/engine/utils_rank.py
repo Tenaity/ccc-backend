@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 
 from models import Staff
 from scheduler.randomize import choose, choose_relaxed
@@ -89,17 +89,17 @@ class FairnessWindow:
             self._today_counts.clear()
             self._today = d
 
-    def bump(self, staff_id: int, code: str, position: str | None) -> None:
+    def bump(self, staff_id: int, code: str, position: Optional[str]) -> None:
         rank = self.rank_map.get(staff_id, 2)
         key = (code, position or "", rank)
         self._today_counts[key] = self._today_counts.get(key, 0) + 1
 
-    def today_for(self, code: str, position: str | None) -> Tuple[int, int]:
+    def today_for(self, code: str, position: Optional[str]) -> Tuple[int, int]:
         k1 = (code, position or "", 1)
         k2 = (code, position or "", 2)
         return self._today_counts.get(k1, 0), self._today_counts.get(k2, 0)
 
-    def summary(self, code: str, position: str | None) -> Tuple[int, int]:
+    def summary(self, code: str, position: Optional[str]) -> Tuple[int, int]:
         k1 = (code, position or "", 1)
         k2 = (code, position or "", 2)
         r1 = sum(self._data.get(k1, [])) + self._today_counts.get(k1, 0)
@@ -114,7 +114,7 @@ def fill_ranked_slots(
     pool_top2: Iterable[Staff],
     cc: ChoiceCtx,
     fairness: Optional[FairnessWindow] = None,
-    position: str | None = None,
+    position: Optional[str] = None,
     want: Optional[Dict[int, int]] = None,
 ) -> List[int]:
     # Determine targets per rank

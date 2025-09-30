@@ -747,5 +747,60 @@ def api_estimate():
     return jsonify(estimate_month(y, m))
 
 
+@app.post("/api/chatbot/upload")
+def api_chatbot_upload():
+    """Proxy endpoint to forward file uploads to the webhook"""
+    import requests
+
+    if 'file' not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No file selected"}), 400
+
+    try:
+        # Forward the file to the webhook
+        files = {'file': (file.filename, file.stream, file.content_type)}
+
+        # Include any additional form data
+        data = {}
+        for key in request.form:
+            data[key] = request.form[key]
+
+        webhook_url = os.getenv("WEBHOOK_UPLOAD_URL", "https://iconic-host.lapage.vn/webhook/demo")
+        response = requests.post(webhook_url, files=files, data=data, timeout=30)
+
+        return jsonify({
+            "status": response.status_code,
+            "response": response.text
+        }), response.status_code
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.post("/api/chatbot/chunking")
+def api_chatbot_chunking():
+    """Proxy endpoint to forward chunking request to the webhook"""
+    import requests
+
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        webhook_url = os.getenv("WEBHOOK_CHUNKING_URL", "https://iconic-host.lapage.vn/webhook/chunking")
+        response = requests.post(webhook_url, json=data, timeout=30)
+
+        return jsonify({
+            "status": response.status_code,
+            "response": response.json() if response.headers.get('content-type') == 'application/json' else response.text
+        }), response.status_code
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     app.run(host=APP_HOST, port=APP_PORT, debug=APP_DEBUG)

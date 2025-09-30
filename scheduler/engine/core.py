@@ -6,7 +6,7 @@ import random
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any, DefaultDict, Deque, Dict, List, Set, Tuple
+from typing import Any, DefaultDict, Deque, Dict, List, Optional, Set, Tuple, Union
 
 from sqlalchemy.orm import Session
 
@@ -18,7 +18,7 @@ from scheduler.repo import load_fixed, load_holidays, load_locked, load_staff
 from scheduler.utils import month_last_day, ymd
 
 ShiftCode = str
-Position = str | None
+Position = Optional[str]
 
 TOLERANCE = 0.9  # lệch công cho phép
 
@@ -81,7 +81,7 @@ class Context:
 
 
 def build_context(
-    *, year: int, month: int, shuffle: bool, seed: int | None, save: bool
+    *, year: int, month: int, shuffle: bool, seed: Optional[int], save: bool
 ) -> Tuple[Context, date, date]:
     """Tạo ngữ cảnh chạy cho cả tháng + trả về (first, last)."""
     first = ymd(year, month, 1)

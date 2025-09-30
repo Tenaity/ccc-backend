@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, timedelta  # ⬅️ thêm date
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from rules import get_profile  # ⬅️ để lấy expected nếu cần đối chiếu nhanh
 from scheduler.utils import day_kind  # ⬅️ dùng khi đối chiếu expected từng ngày
@@ -22,7 +22,7 @@ def schedule_month(
     month: int,
     *,
     shuffle: bool = False,
-    seed: int | None = None,
+    seed: Optional[int] = None,
     save: bool = False,
     fill_hc: bool = False,
 ):
