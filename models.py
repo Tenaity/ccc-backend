@@ -27,6 +27,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+DEFAULT_DB_URL = os.getenv("DEFAULT_DB_URL", "sqlite:///instance/app.sqlite")
 DB_URL_ENV = os.getenv("DATABASE_URL") or os.getenv("DB_URL")
 
 if DB_URL_ENV:
@@ -39,35 +40,40 @@ else:
         "DB_USER": os.getenv("DB_USER"),
         "DB_PASSWORD": os.getenv("DB_PASSWORD"),
     }
-    missing = [key for key, value in cfg.items() if not value]
-    if missing:
-        joined = ", ".join(missing)
-        raise RuntimeError(
-            "Missing database configuration for: " + joined
+
+    provided = [value for value in cfg.values() if value]
+    if not provided:
+        DB_URL = DEFAULT_DB_URL
+    else:
+        missing = [key for key, value in cfg.items() if not value]
+        if missing:
+            joined = ", ".join(missing)
+            raise RuntimeError(
+                "Missing database configuration for: " + joined
+            )
+
+        tz = os.getenv("DB_TIMEZONE")
+        opts = os.getenv("DB_OPTIONS")
+
+        user = quote_plus(cfg["DB_USER"])
+        password = quote_plus(cfg["DB_PASSWORD"])
+        base = (
+            f"postgresql+psycopg://{user}:{password}"
+            f"@{cfg['DB_HOST']}:{cfg['DB_PORT']}/{cfg['DB_NAME']}"
         )
 
-    tz = os.getenv("DB_TIMEZONE")
-    opts = os.getenv("DB_OPTIONS")
+        query_parts = []
+        if opts:
+            opt_payload = opts.lstrip("?")
+            if opt_payload:
+                query_parts.append(opt_payload)
+        if tz:
+            query_parts.append(f"options={quote_plus(f'-c TimeZone={tz}')}")
 
-    user = quote_plus(cfg["DB_USER"])
-    password = quote_plus(cfg["DB_PASSWORD"])
-    base = (
-        f"postgresql+psycopg://{user}:{password}"
-        f"@{cfg['DB_HOST']}:{cfg['DB_PORT']}/{cfg['DB_NAME']}"
-    )
-
-    query_parts = []
-    if opts:
-        opt_payload = opts.lstrip("?")
-        if opt_payload:
-            query_parts.append(opt_payload)
-    if tz:
-        query_parts.append(f"options={quote_plus(f'-c TimeZone={tz}')}")
-
-    if query_parts:
-        DB_URL = f"{base}?{'&'.join(query_parts)}"
-    else:
-        DB_URL = base
+        if query_parts:
+            DB_URL = f"{base}?{'&'.join(query_parts)}"
+        else:
+            DB_URL = base
 
 if DB_URL.startswith("sqlite:///"):
     db_file = DB_URL.replace("sqlite:///", "", 1)
