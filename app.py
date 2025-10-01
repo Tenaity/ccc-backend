@@ -768,7 +768,7 @@ def api_chatbot_upload():
         for key in request.form:
             data[key] = request.form[key]
 
-        webhook_url = os.getenv("WEBHOOK_UPLOAD_URL", "https://iconic-host.lapage.vn/webhook/demo")
+        webhook_url = os.getenv("WEBHOOK_UPLOAD_URL", "https://iconic-host.lapage.vn/webhook/upload-file")
         response = requests.post(webhook_url, files=files, data=data, timeout=30)
 
         return jsonify({
