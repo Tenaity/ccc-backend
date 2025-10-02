@@ -18,6 +18,12 @@ SQLite via SQLAlchemy; migrations via `make migrate`. Models: `Staff`, `Assignme
 - Do not overwrite fixed placements; log `FIX_BLOCK` and surface via `/api/schedule/validate`
 - Night rescue (`ALLOW_OVERCAP_NIGHT_LEADER`) should stay emergency-only; never use it to bypass quota bugs
 
+## Scheduler engine cheat sheet
+- `schedule_month` phases: (0) scatter weekday HC, (1) night assignments with single TC leader cap, (2) day shifts with rank fairness, (3) optional HC rebalance, then validation for exactly one K@TD per day via `validate_one_day_leader`.
+- Demand profiles live in `rules/CSKH_2025`; keep `expectedByDay` aligned whenever you tweak shift requirements so frontend advanced stats remain accurate.
+- Always call `reset_trackers()` before generating; stale credit state causes quota leaks and duplicate leaders.
+- Engine responses should populate `perDayLeaders`, conflict lists, and credit deltas—frontend glass UI surfaces these for operators.
+
 ## Testing
 - Add unit tests for each engine change (night/day phases, fairness, validation)
 - Exercise both happy-path & quota edge cases (locked staff, fixed Đ@TD, fairness 7-day window)
