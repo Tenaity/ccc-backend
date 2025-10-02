@@ -1312,11 +1312,74 @@ def gen():
     save_flag = bool(payload.get("save", False))
     fill_hc = bool(payload.get("fill_hc", False))
 
+    try:
+        with SessionLocal() as session:
+            month_config = session.execute(
+                select(MonthConfig).where(
+                    MonthConfig.year == year, MonthConfig.month == month
+                )
+            ).scalar_one_or_none()
+            shift_defaults = session.execute(
+                select(ShiftPlanDefaults).where(
+                    ShiftPlanDefaults.year == year,
+                    ShiftPlanDefaults.month == month,
+                )
+            ).scalar_one_or_none()
+
+            missing: dict[str, str] = {}
+            if month_config is None:
+                missing["month_config"] = (
+                    f"No month config found for {year}-{month:02d}"
+                )
+            if shift_defaults is None:
+                missing["shift_plan_defaults"] = (
+                    f"No shift plan defaults found for {year}-{month:02d}"
+                )
+            if missing:
+                return (
+                    jsonify(
+                        {
+                            "ok": False,
+                            "error": "Missing configuration",
+                            "missing": missing,
+                        }
+                    ),
+                    400,
+                )
+
+            config_payload = _build_month_config_payload(session, year, month)
+            effective_working_days = float(
+                config_payload.get("effective_working_days", 0.0)
+            )
+            shift_plan_defaults = {
+                "day_shifts": shift_defaults.day_shifts,
+                "night_shifts": shift_defaults.night_shifts,
+                "leader_shifts": shift_defaults.leader_shifts,
+                "pgd_shifts": shift_defaults.pgd_shifts,
+            }
+    except Exception as exc:  # pragma: no cover - defensive guard
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": f"Internal error: {exc.__class__.__name__}: {exc}",
+                }
+            ),
+            500,
+        )
+
     print("[API] generate begin", year, month, shuffle, seed, save_flag, fill_hc, flush=True)
 
     try:
         res = generate_schedule(
-            year, month, shuffle=shuffle, seed=seed, save=save_flag, fill_hc=fill_hc
+            year,
+            month,
+            shuffle=shuffle,
+            seed=seed,
+            save=save_flag,
+            fill_hc=fill_hc,
+            effective_working_days=effective_working_days,
+            shift_plan_defaults=shift_plan_defaults,
         )
         print("[API] generate end", type(res), flush=True)
         # engine may return a dict or (dict, status)

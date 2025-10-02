@@ -168,6 +168,48 @@ def test_import_holidays_from_nager(client, monkeypatch):
     assert len(rows) == 3
 
 
+def test_import_year_holidays_matches_count(client, monkeypatch):
+    app = client.client
+    module = client.module
+
+    incoming = [
+        {
+            "day": date(2027, 1, 1),
+            "name": "New Year",
+            "kind": "Public",
+            "official": True,
+            "source": "nager",
+        },
+        {
+            "day": date(2027, 4, 30),
+            "name": "Liberation Day",
+            "kind": "Public",
+            "official": True,
+            "source": "nager",
+        },
+        {
+            "day": date(2027, 5, 1),
+            "name": "Labour Day",
+            "kind": "Public",
+            "official": True,
+            "source": "nager",
+        },
+    ]
+
+    monkeypatch.setattr(module, "_fetch_nager_holidays", lambda year: incoming)
+
+    res = app.post("/api/holidays/import?year=2027&source=nager")
+    assert res.status_code == 200
+    payload = res.get_json()
+    assert payload["inserted"] == len(incoming)
+
+    res = app.get("/api/holidays?year=2027")
+    assert res.status_code == 200
+    rows = res.get_json()
+    assert len(rows) == len(incoming)
+    assert {row["day"] for row in rows} == {item["day"].isoformat() for item in incoming}
+
+
 def test_fetch_nager_holidays(monkeypatch):
     import app as app_module
 
