@@ -5,6 +5,8 @@ import io
 import json
 import os
 import pathlib
+import urllib.error
+import urllib.request
 from datetime import date, timedelta
 
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
@@ -51,6 +53,69 @@ APP_DEBUG = os.getenv("APP_ENV", "local").lower() != "production"
 
 # Khởi tạo DB (tạo bảng nếu chưa có)
 init_db()
+
+
+class HolidayImportError(RuntimeError):
+    """Raised when an external holiday provider cannot be fetched."""
+
+
+def _serialize_holiday(row: Holiday) -> dict:
+    """Convert a Holiday row to JSON-serialisable dict."""
+
+    return {
+        "id": row.id,
+        "day": row.day.isoformat(),
+        "name": row.name,
+        "kind": row.kind,
+        "official": bool(row.official),
+        "source": row.source,
+    }
+
+
+def _fetch_nager_holidays(year: int, country_code: str = "VN") -> list[dict]:
+    """Fetch holidays from Nager.Date API for a year."""
+
+    url = f"https://date.nager.at/api/v3/PublicHolidays/{year}/{country_code}".strip()
+    try:
+        with urllib.request.urlopen(url, timeout=15) as response:
+            status = getattr(response, "status", None) or response.getcode()
+            if status >= 400:
+                raise HolidayImportError(f"Provider returned HTTP {status}")
+            payload = response.read()
+    except urllib.error.URLError as exc:  # pragma: no cover - network failure branch
+        raise HolidayImportError(str(exc)) from exc
+
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError as exc:  # pragma: no cover - provider bug branch
+        raise HolidayImportError("Invalid JSON payload") from exc
+
+    if not isinstance(data, list):
+        raise HolidayImportError("Unexpected response schema")
+
+    out: list[dict] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        day = item.get("date")
+        try:
+            day_value = date.fromisoformat(day)
+        except Exception:
+            continue
+        name = item.get("localName") or item.get("name") or "(unnamed)"
+        types = item.get("types") or []
+        kind = ",".join(t for t in types if isinstance(t, str)) or None
+        official = "Public" in types or bool(item.get("global"))
+        out.append(
+            {
+                "day": day_value,
+                "name": name,
+                "kind": kind,
+                "official": official,
+                "source": "nager",
+            }
+        )
+    return out
 
 
 # ---------- Root / SPA ----------
@@ -411,17 +476,22 @@ def delete_off_day(off_id: int):
 # ---------- Holidays ----------
 @app.get("/api/holidays")
 def list_holidays():
-    """List holidays for a given month (defaults to current)."""
-    today = date.today()
-    y = request.args.get("year", type=int) or today.year
-    m = request.args.get("month", type=int) or today.month
+    """List holidays for a given year, optionally filtering by month."""
 
-    if m < 1 or m > 12:
+    today = date.today()
+    year = request.args.get("year", type=int) or today.year
+    month = request.args.get("month", type=int)
+
+    if month is not None and (month < 1 or month > 12):
         return {"error": "month must be 1..12"}, 400
 
-    last_day = calendar.monthrange(y, m)[1]
-    start = date(y, m, 1)
-    end = date(y, m, last_day)
+    if month is None:
+        start = date(year, 1, 1)
+        end = date(year, 12, 31)
+    else:
+        last_day = calendar.monthrange(year, month)[1]
+        start = date(year, month, 1)
+        end = date(year, month, last_day)
 
     try:
         with SessionLocal() as s:
@@ -431,16 +501,7 @@ def list_holidays():
                 .order_by(Holiday.day.asc())
                 .all()
             )
-            return jsonify(
-                [
-                    {
-                        "id": row.id,
-                        "day": row.day.isoformat(),
-                        "name": row.name,
-                    }
-                    for row in rows
-                ]
-            )
+            return jsonify([_serialize_holiday(row) for row in rows])
     except Exception as e:
         return (
             jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}),
@@ -453,28 +514,80 @@ def create_holiday():
     data = request.get_json(force=True) or {}
     day_str = data.get("day")
     name = data.get("name")
+    kind = data.get("kind") or None
+    official = bool(data.get("official", False))
+    source = data.get("source") or None
 
     if not day_str:
         return {"error": "day required"}, 400
 
     try:
-        d = date.fromisoformat(day_str)
+        holiday_day = date.fromisoformat(day_str)
     except Exception:
         return {"error": "day must be YYYY-MM-DD"}, 400
 
     try:
         with SessionLocal() as s:
-            existing = s.query(Holiday).filter(Holiday.day == d).first()
+            existing = s.query(Holiday).filter(Holiday.day == holiday_day).first()
             if existing:
-                item = {"id": existing.id, "day": existing.day.isoformat(), "name": existing.name}
-                return {"ok": True, "item": item}
+                return {"ok": True, "item": _serialize_holiday(existing)}
 
-            holiday = Holiday(day=d, name=name)
+            holiday = Holiday(
+                day=holiday_day,
+                name=name,
+                kind=kind,
+                official=official,
+                source=source,
+            )
             s.add(holiday)
             s.commit()
             s.refresh(holiday)
-            item = {"id": holiday.id, "day": holiday.day.isoformat(), "name": holiday.name}
-            return {"ok": True, "item": item}, 201
+            return {"ok": True, "item": _serialize_holiday(holiday)}, 201
+    except Exception as e:
+        return (
+            jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}),
+            500,
+        )
+
+
+@app.put("/api/holidays/<int:holiday_id>")
+def update_holiday(holiday_id: int):
+    data = request.get_json(force=True) or {}
+
+    try:
+        with SessionLocal() as s:
+            row = s.get(Holiday, holiday_id)
+            if not row:
+                return {"error": "Not found"}, 404
+
+            if "day" in data:
+                day_str = data.get("day")
+                try:
+                    new_day = date.fromisoformat(day_str)
+                except Exception:
+                    return {"error": "day must be YYYY-MM-DD"}, 400
+
+                conflict = (
+                    s.query(Holiday)
+                    .filter(Holiday.day == new_day, Holiday.id != holiday_id)
+                    .first()
+                )
+                if conflict:
+                    return {"error": "day already exists"}, 409
+                row.day = new_day
+
+            if "name" in data:
+                row.name = data.get("name")
+            if "kind" in data:
+                row.kind = data.get("kind") or None
+            if "official" in data:
+                row.official = bool(data.get("official"))
+            if "source" in data:
+                row.source = data.get("source") or None
+
+            s.commit()
+            s.refresh(row)
+            return {"ok": True, "item": _serialize_holiday(row)}
     except Exception as e:
         return (
             jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}),
@@ -492,6 +605,85 @@ def delete_holiday(holiday_id: int):
             s.delete(row)
             s.commit()
             return {"ok": True}
+    except Exception as e:
+        return (
+            jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}),
+            500,
+        )
+
+
+@app.post("/api/holidays/import")
+def import_holidays():
+    """Import holidays from external providers."""
+
+    year = request.args.get("year", type=int)
+    source = (request.args.get("source") or "").lower()
+
+    if not year:
+        return {"error": "year required"}, 400
+    if source != "nager":
+        return {"error": "unsupported source"}, 400
+
+    try:
+        incoming = _fetch_nager_holidays(year)
+    except HolidayImportError as exc:
+        return {"error": f"Import failed: {exc}"}, 502
+
+    days = [item["day"] for item in incoming]
+
+    try:
+        with SessionLocal() as s:
+            existing_rows = (
+                s.query(Holiday)
+                .filter(Holiday.day.in_(days))
+                .all()
+                if days
+                else []
+            )
+            existing_by_day = {row.day: row for row in existing_rows}
+
+            inserted = 0
+            updated = 0
+
+            for item in incoming:
+                existing = existing_by_day.get(item["day"])
+                if existing:
+                    existing.name = item["name"]
+                    existing.kind = item["kind"]
+                    existing.official = item["official"]
+                    existing.source = item["source"]
+                    updated += 1
+                else:
+                    holiday = Holiday(
+                        day=item["day"],
+                        name=item["name"],
+                        kind=item["kind"],
+                        official=item["official"],
+                        source=item["source"],
+                    )
+                    s.add(holiday)
+                    inserted += 1
+
+            s.commit()
+
+            year_rows = (
+                s.query(Holiday)
+                .filter(
+                    Holiday.day.between(
+                        date(year, 1, 1),
+                        date(year, 12, 31),
+                    )
+                )
+                .order_by(Holiday.day.asc())
+                .all()
+            )
+
+            return {
+                "ok": True,
+                "inserted": inserted,
+                "updated": updated,
+                "items": [_serialize_holiday(row) for row in year_rows],
+            }
     except Exception as e:
         return (
             jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}),
