@@ -27,9 +27,11 @@ All routes are rooted at `http://localhost:8000`. Unless noted otherwise respons
 - Legacy aliases also exist under `/api/offdays`
 
 ## Holidays
-- `GET /api/holidays` — list holidays (`year`, `month` query params)
-- `POST /api/holidays` — create holiday (`day`, `name`)
+- `GET /api/holidays` — list holidays (`year` required, optional `month` filter)
+- `POST /api/holidays` — create holiday (`day`, `name`, optional `kind`, `official`, `source`)
+- `PUT /api/holidays/{id}` — update holiday metadata/day
 - `DELETE /api/holidays/{id}` — delete holiday
+- `POST /api/holidays/import?year=YYYY&source=nager` — import official VN holidays from Nager.Date
 
 ## Schedule and assignments
 - `GET /api/assignments` — list generated assignments for the month (`year`, `month`)
