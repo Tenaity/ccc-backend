@@ -55,6 +55,10 @@ class Context:
     save: bool
     session: Session
 
+    # ===== cấu hình tháng
+    working_day_target: float | None = None
+    shift_plan_defaults: Dict[str, int] = field(default_factory=dict)
+
     # ===== accumulators
     credit_map: DefaultDict[int, float] = field(default_factory=lambda: defaultdict(float))
     _planned: List[Planned] = field(default_factory=list)
@@ -81,7 +85,14 @@ class Context:
 
 
 def build_context(
-    *, year: int, month: int, shuffle: bool, seed: Optional[int], save: bool
+    *,
+    year: int,
+    month: int,
+    shuffle: bool,
+    seed: Optional[int],
+    save: bool,
+    working_day_target: float | None = None,
+    shift_plan_defaults: dict[str, int] | None = None,
 ) -> Tuple[Context, date, date]:
     """Tạo ngữ cảnh chạy cho cả tháng + trả về (first, last)."""
     first = ymd(year, month, 1)
@@ -130,6 +141,8 @@ def build_context(
         fixed=fixed,
         holidays=holidays,
         base_quota=base_quota,
+        working_day_target=working_day_target,
+        shift_plan_defaults=dict(shift_plan_defaults or {}),
         rng=rng,
         save=save,
         session=s,

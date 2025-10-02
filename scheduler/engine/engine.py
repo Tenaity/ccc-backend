@@ -25,13 +25,23 @@ def schedule_month(
     seed: Optional[int] = None,
     save: bool = False,
     fill_hc: bool = False,
+    effective_working_days: float | None = None,
+    shift_plan_defaults: dict[str, int] | None = None,
 ):
     print(
         f"[ENGINE] start y={year} m={month} shuffle={shuffle} seed={seed} save={save} fill_hc={fill_hc}"
     )
     reset_trackers()
 
-    ctx, first, last = build_context(year=year, month=month, shuffle=shuffle, seed=seed, save=save)
+    ctx, first, last = build_context(
+        year=year,
+        month=month,
+        shuffle=shuffle,
+        seed=seed,
+        save=save,
+        working_day_target=effective_working_days,
+        shift_plan_defaults=shift_plan_defaults,
+    )
     # build rank map for fairness
     rank_map = {st.id: 1 for st in ctx.GDV1}
     rank_map.update({st.id: 1 for st in ctx.TC})
