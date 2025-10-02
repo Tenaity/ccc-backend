@@ -1,6 +1,7 @@
 # backend/models.py
 import os
 from datetime import date
+from enum import Enum as PyEnum
 from typing import List, Optional
 from urllib.parse import quote_plus
 
@@ -11,10 +12,13 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    JSON,
     String,
+    UniqueConstraint,
     create_engine,
     inspect,
 )
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import (
     Mapped,
     declarative_base,
@@ -22,6 +26,7 @@ from sqlalchemy.orm import (
     relationship,
     sessionmaker,
 )
+from sqlalchemy.sql import expression
 
 from dotenv import load_dotenv
 
@@ -132,34 +137,147 @@ class Assignment(Base):
     staff: Mapped[Optional[Staff]] = relationship()
 
 
+
+class WeekendPolicy(str, PyEnum):
+    SAT_OFF = "sat_off"
+    SAT_WORK_AM = "sat_work_am"
+    SAT_WORK = "sat_work"
+
+
 class Holiday(Base):
-    __tablename__ = "holidays"
-    id = Column(Integer, primary_key=True)
-    day = Column(Date, unique=True, nullable=False)
-    name = Column(String, nullable=True)
+    __tablename__ = "holiday"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    day: Mapped[date] = mapped_column(
+        "date", Date, unique=True, nullable=False
+    )
+    name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    kind: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    official: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=expression.false(),
+    )
+    source: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+
+class MonthConfig(Base):
+    __tablename__ = "month_config"
+    __table_args__ = (
+        UniqueConstraint("year", "month", name="uq_month_config_year_month"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    month: Mapped[int] = mapped_column(Integer, nullable=False)
+    working_days_override: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    weekend_policy: Mapped[WeekendPolicy] = mapped_column(
+        SAEnum(WeekendPolicy, name="weekend_policy"),
+        nullable=False,
+        default=WeekendPolicy.SAT_OFF,
+        server_default=WeekendPolicy.SAT_OFF.value,
+    )
+    extra_workdays: Mapped[List[str]] = mapped_column(
+        JSON, nullable=False, default=list, server_default="[]"
+    )
+    extra_offdays: Mapped[List[str]] = mapped_column(
+        JSON, nullable=False, default=list, server_default="[]"
+    )
+
+
+class ShiftPlanDefaults(Base):
+    __tablename__ = "shift_plan_defaults"
+    __table_args__ = (
+        UniqueConstraint(
+            "year",
+            "month",
+            name="uq_shift_plan_defaults_year_month",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    month: Mapped[int] = mapped_column(Integer, nullable=False)
+    day_shifts: Mapped[int] = mapped_column(Integer, nullable=False)
+    night_shifts: Mapped[int] = mapped_column(Integer, nullable=False)
+    leader_shifts: Mapped[int] = mapped_column(Integer, nullable=False)
+    pgd_shifts: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 def init_db():
     """Create tables and run lightweight migrations.
 
-    Ensures the ``fixed_assignment`` table always has the ``position`` column,
-    even for databases created before the column was introduced.
+    Ensures schema changes introduced over time are reflected when running in
+    environments without Alembic migrations.
     """
+
+    insp = inspect(engine)
+    try:
+        existing_tables = set(insp.get_table_names())
+    except Exception:
+        existing_tables = set()
+
+    if "holidays" in existing_tables and "holiday" not in existing_tables:
+        with engine.begin() as conn:
+            conn.exec_driver_sql("ALTER TABLE holidays RENAME TO holiday")
+        existing_tables.remove("holidays")
+        existing_tables.add("holiday")
+
     Base.metadata.create_all(engine)
 
-    # --- Migration: add ``position`` column if missing ---
     insp = inspect(engine)
     try:
         tables = set(insp.get_table_names())
     except Exception:
         return
 
-    if "fixed_assignment" not in tables:
-        return
+    # --- Migration: holiday table enhancements ---
+    if "holiday" in tables:
+        holiday_cols = {col["name"] for col in insp.get_columns("holiday")}
 
-    cols = {col["name"] for col in insp.get_columns("fixed_assignment")}
-    if "position" not in cols:
-        with engine.begin() as conn:
-            conn.exec_driver_sql(
-                "ALTER TABLE fixed_assignment ADD COLUMN position VARCHAR NULL"
-            )
+        if "day" in holiday_cols and "date" not in holiday_cols:
+            with engine.begin() as conn:
+                conn.exec_driver_sql("ALTER TABLE holiday RENAME COLUMN day TO date")
+            insp = inspect(engine)
+            holiday_cols = {col["name"] for col in insp.get_columns("holiday")}
+
+        if "kind" not in holiday_cols:
+            with engine.begin() as conn:
+                conn.exec_driver_sql(
+                    "ALTER TABLE holiday ADD COLUMN kind VARCHAR NULL"
+                )
+            insp = inspect(engine)
+            holiday_cols = {col["name"] for col in insp.get_columns("holiday")}
+
+        if "official" not in holiday_cols:
+            with engine.begin() as conn:
+                conn.exec_driver_sql(
+                    "ALTER TABLE holiday ADD COLUMN official BOOLEAN NOT NULL DEFAULT false"
+                )
+            insp = inspect(engine)
+            holiday_cols = {col["name"] for col in insp.get_columns("holiday")}
+
+        if "source" not in holiday_cols:
+            with engine.begin() as conn:
+                conn.exec_driver_sql(
+                    "ALTER TABLE holiday ADD COLUMN source VARCHAR NULL"
+                )
+
+        uniques = insp.get_unique_constraints("holiday")
+        has_date_unique = any(
+            "date" in constraint.get("column_names", []) for constraint in uniques
+        )
+        if not has_date_unique:
+            with engine.begin() as conn:
+                conn.exec_driver_sql(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_holiday_date ON holiday(date)"
+                )
+
+    # --- Migration: add ``position`` column if missing ---
+    if "fixed_assignment" in tables:
+        cols = {col["name"] for col in insp.get_columns("fixed_assignment")}
+        if "position" not in cols:
+            with engine.begin() as conn:
+                conn.exec_driver_sql(
+                    "ALTER TABLE fixed_assignment ADD COLUMN position VARCHAR NULL"
+                )
