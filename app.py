@@ -18,7 +18,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from api.export_month_csv import export_month_csv as _export_month_csv
-from models import Assignment, FixedAssignment, Holiday, OffDay, SessionLocal, Staff, engine, init_db
+from models import (
+    Assignment,
+    FixedAssignment,
+    Holiday,
+    MonthConfig,
+    OffDay,
+    SessionLocal,
+    Staff,
+    WeekendPolicy,
+    engine,
+    init_db,
+)
 from rules import SHIFT_DEFS, get_profile
 from scheduler import schedule_month as generate_schedule
 from scheduler.estimator import estimate_month
@@ -116,6 +127,156 @@ def _fetch_nager_holidays(year: int, country_code: str = "VN") -> list[dict]:
             }
         )
     return out
+
+
+def _parse_year_month(year_raw, month_raw) -> tuple[int, int]:
+    """Validate and convert year/month inputs."""
+
+    if year_raw is None or month_raw is None:
+        raise ValueError("year and month required")
+    try:
+        year = int(year_raw)
+        month = int(month_raw)
+    except (TypeError, ValueError) as exc:  # pragma: no cover - defensive guard
+        raise ValueError("year and month must be integers") from exc
+    if month < 1 or month > 12:
+        raise ValueError("month must be between 1 and 12")
+    if year < 1900 or year > 2100:
+        raise ValueError("year must be between 1900 and 2100")
+    return year, month
+
+
+def _coerce_extra_dates(
+    values: object, year: int, month: int, field_name: str
+) -> set[date] | None:
+    """Validate optional list of YYYY-MM-DD strings limited to the target month."""
+
+    if values is None:
+        return None
+    if not isinstance(values, list):
+        raise ValueError(f"{field_name} must be a list of dates")
+
+    parsed: set[date] = set()
+    for item in values:
+        if not isinstance(item, str):
+            raise ValueError(f"{field_name} must contain YYYY-MM-DD strings")
+        try:
+            dt = date.fromisoformat(item)
+        except ValueError as exc:
+            raise ValueError(f"{field_name} has invalid date '{item}'") from exc
+        if dt.year != year or dt.month != month:
+            raise ValueError(
+                f"{field_name} must stay within {year}-{month:02d}"
+            )
+        parsed.add(dt)
+    return parsed
+
+
+def _build_month_config_payload(session, year: int, month: int) -> dict:
+    """Construct payload for month config, including derived working days."""
+
+    config = session.execute(
+        select(MonthConfig).where(
+            MonthConfig.year == year, MonthConfig.month == month
+        )
+    ).scalar_one_or_none()
+
+    weekend_policy = (
+        config.weekend_policy if config else WeekendPolicy.SAT_OFF
+    )
+    stored_workdays = config.extra_workdays if config else []
+    stored_offdays = config.extra_offdays if config else []
+    working_days_override = (
+        config.working_days_override if config else None
+    )
+
+    last_day = month_last_day(year, month)
+    start = date(year, month, 1)
+    end = date(year, month, last_day)
+
+    official_holidays = {
+        row.day
+        for row in session.scalars(
+            select(Holiday).where(
+                Holiday.day >= start,
+                Holiday.day <= end,
+                Holiday.official.is_(True),
+            )
+        )
+    }
+
+    auto_working_days = sum(
+        1
+        for day in range(1, last_day + 1)
+        if (dt := date(year, month, day)).weekday() < 5
+        and dt not in official_holidays
+    )
+
+    day_values: dict[date, float] = {}
+    for day in range(1, last_day + 1):
+        current = date(year, month, day)
+        weekday = current.weekday()
+        if weekday < 5:
+            base = 1.0
+        elif weekday == 5:
+            if weekend_policy == WeekendPolicy.SAT_WORK:
+                base = 1.0
+            elif weekend_policy == WeekendPolicy.SAT_WORK_AM:
+                base = 0.5
+            else:
+                base = 0.0
+        else:
+            base = 0.0
+        if current in official_holidays:
+            base = 0.0
+        day_values[current] = base
+
+    workday_dates = set()
+    for raw in stored_workdays:
+        try:
+            dt = date.fromisoformat(raw)
+        except ValueError:
+            continue
+        if dt.year == year and dt.month == month:
+            workday_dates.add(dt)
+    offday_dates = set()
+    for raw in stored_offdays:
+        try:
+            dt = date.fromisoformat(raw)
+        except ValueError:
+            continue
+        if dt.year == year and dt.month == month:
+            offday_dates.add(dt)
+
+    for extra in workday_dates:
+        if start <= extra <= end:
+            day_values[extra] = max(day_values.get(extra, 0.0), 1.0)
+
+    for extra in offday_dates:
+        if start <= extra <= end:
+            day_values[extra] = 0.0
+
+    policy_working_days = sum(day_values.values())
+    effective_working_days = (
+        working_days_override
+        if working_days_override is not None
+        else policy_working_days
+    )
+
+    payload = {
+        "year": year,
+        "month": month,
+        "auto_working_days": auto_working_days,
+        "policy_working_days": policy_working_days,
+        "effective_working_days": effective_working_days,
+        "config": {
+            "weekend_policy": weekend_policy.value,
+            "extra_workdays": sorted(dt.isoformat() for dt in workday_dates),
+            "extra_offdays": sorted(dt.isoformat() for dt in offday_dates),
+            "working_days_override": working_days_override,
+        },
+    }
+    return payload
 
 
 # ---------- Root / SPA ----------
@@ -689,6 +850,150 @@ def import_holidays():
             jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}),
             500,
         )
+
+
+# ---------- Month config ----------
+@app.get("/api/month-config")
+def get_month_config():
+    try:
+        year, month = _parse_year_month(
+            request.args.get("year"), request.args.get("month")
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    except Exception as exc:  # pragma: no cover - defensive guard
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": f"Internal error: {exc.__class__.__name__}: {exc}",
+                }
+            ),
+            500,
+        )
+
+    try:
+        with SessionLocal() as session:
+            payload = _build_month_config_payload(session, year, month)
+            return jsonify(payload)
+    except Exception as exc:  # pragma: no cover - defensive guard
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": f"Internal error: {exc.__class__.__name__}: {exc}",
+                }
+            ),
+            500,
+        )
+
+
+@app.put("/api/month-config")
+def upsert_month_config():
+    data = request.get_json(silent=True) or {}
+    try:
+        year, month = _parse_year_month(data.get("year"), data.get("month"))
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    except Exception as exc:  # pragma: no cover - defensive guard
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": f"Internal error: {exc.__class__.__name__}: {exc}",
+                }
+            ),
+            500,
+        )
+
+    try:
+        weekend_policy = None
+        working_days_override = None
+
+        def _existing_dates(values: list[str] | None) -> set[date]:
+            dates: set[date] = set()
+            for raw in values or []:
+                if not isinstance(raw, str):
+                    continue
+                try:
+                    dt = date.fromisoformat(raw)
+                except ValueError:
+                    continue
+                if dt.year == year and dt.month == month:
+                    dates.add(dt)
+            return dates
+
+        with SessionLocal() as session:
+            config = session.execute(
+                select(MonthConfig).where(
+                    MonthConfig.year == year, MonthConfig.month == month
+                )
+            ).scalar_one_or_none()
+
+            if config is None:
+                config = MonthConfig(year=year, month=month)
+                session.add(config)
+
+            if "weekend_policy" in data:
+                policy_raw = data.get("weekend_policy")
+                if policy_raw is None:
+                    weekend_policy = WeekendPolicy.SAT_OFF
+                else:
+                    try:
+                        weekend_policy = WeekendPolicy(policy_raw)
+                    except ValueError as exc:  # pragma: no cover - enum guard
+                        raise ValueError("weekend_policy invalid") from exc
+            else:
+                weekend_policy = config.weekend_policy or WeekendPolicy.SAT_OFF
+
+            override_sentinel = object()
+            override_raw = data.get("working_days_override", override_sentinel)
+            if override_raw is override_sentinel:
+                working_days_override = config.working_days_override
+            elif override_raw is None:
+                working_days_override = None
+            else:
+                try:
+                    working_days_override = int(override_raw)
+                except (TypeError, ValueError) as exc:  # pragma: no cover - guard
+                    raise ValueError("working_days_override must be an integer") from exc
+                if working_days_override < 0:
+                    raise ValueError("working_days_override must be >= 0")
+
+            existing_workdays = _existing_dates(config.extra_workdays)
+            existing_offdays = _existing_dates(config.extra_offdays)
+
+            workdays = _coerce_extra_dates(
+                data.get("extra_workdays"), year, month, "extra_workdays"
+            )
+            offdays = _coerce_extra_dates(
+                data.get("extra_offdays"), year, month, "extra_offdays"
+            )
+
+            if workdays is None:
+                workdays = set(existing_workdays)
+            else:
+                workdays = set(workdays)
+            if offdays is None:
+                offdays = set(existing_offdays)
+            else:
+                offdays = set(offdays)
+
+            workdays -= offdays
+
+            config.year = year
+            config.month = month
+            config.weekend_policy = weekend_policy
+            config.extra_workdays = sorted(dt.isoformat() for dt in workdays)
+            config.extra_offdays = sorted(dt.isoformat() for dt in offdays)
+            config.working_days_override = working_days_override
+
+            session.commit()
+
+            payload = _build_month_config_payload(session, year, month)
+            return jsonify(payload)
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
 
 
 # Backwards‑compat aliases for old /api/offdays routes
