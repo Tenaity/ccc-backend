@@ -24,6 +24,7 @@ from models import (
     Holiday,
     MonthConfig,
     OffDay,
+    ShiftPlanDefaults,
     SessionLocal,
     Staff,
     WeekendPolicy,
@@ -277,6 +278,21 @@ def _build_month_config_payload(session, year: int, month: int) -> dict:
         },
     }
     return payload
+
+
+def _serialize_shift_defaults(
+    defaults: ShiftPlanDefaults | None, year: int, month: int
+) -> dict:
+    """Return API payload describing stored shift plan defaults for a month."""
+
+    return {
+        "year": year,
+        "month": month,
+        "day_shifts": defaults.day_shifts if defaults else 0,
+        "night_shifts": defaults.night_shifts if defaults else 0,
+        "leader_shifts": defaults.leader_shifts if defaults else 0,
+        "pgd_shifts": defaults.pgd_shifts if defaults else 0,
+    }
 
 
 # ---------- Root / SPA ----------
@@ -848,6 +864,117 @@ def import_holidays():
     except Exception as e:
         return (
             jsonify({"ok": False, "error": f"Internal error: {e.__class__.__name__}: {e}"}),
+            500,
+        )
+
+
+# ---------- Shift plan defaults ----------
+@app.get("/api/shift-defaults")
+def get_shift_defaults():
+    try:
+        year, month = _parse_year_month(
+            request.args.get("year"), request.args.get("month")
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    except Exception as exc:  # pragma: no cover - defensive guard
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": f"Internal error: {exc.__class__.__name__}: {exc}",
+                }
+            ),
+            500,
+        )
+
+    try:
+        with SessionLocal() as session:
+            defaults = session.execute(
+                select(ShiftPlanDefaults).where(
+                    ShiftPlanDefaults.year == year,
+                    ShiftPlanDefaults.month == month,
+                )
+            ).scalar_one_or_none()
+            return jsonify(_serialize_shift_defaults(defaults, year, month))
+    except Exception as exc:  # pragma: no cover - defensive guard
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": f"Internal error: {exc.__class__.__name__}: {exc}",
+                }
+            ),
+            500,
+        )
+
+
+@app.put("/api/shift-defaults")
+def upsert_shift_defaults():
+    data = request.get_json(silent=True) or {}
+    try:
+        year, month = _parse_year_month(data.get("year"), data.get("month"))
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    except Exception as exc:  # pragma: no cover - defensive guard
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": f"Internal error: {exc.__class__.__name__}: {exc}",
+                }
+            ),
+            500,
+        )
+
+    fields = ["day_shifts", "night_shifts", "leader_shifts", "pgd_shifts"]
+    missing = [field for field in fields if field not in data]
+    if missing:
+        return {"error": f"Missing fields: {', '.join(missing)}"}, 400
+
+    validated: dict[str, int] = {}
+    for field in fields:
+        value = data.get(field)
+        if not isinstance(value, int):
+            return {"error": f"{field} must be an integer"}, 400
+        if value < 0:
+            return {"error": f"{field} must be >= 0"}, 400
+        validated[field] = value
+
+    try:
+        with SessionLocal() as session:
+            defaults = session.execute(
+                select(ShiftPlanDefaults).where(
+                    ShiftPlanDefaults.year == year,
+                    ShiftPlanDefaults.month == month,
+                )
+            ).scalar_one_or_none()
+
+            if defaults is None:
+                defaults = ShiftPlanDefaults(
+                    year=year,
+                    month=month,
+                    day_shifts=validated["day_shifts"],
+                    night_shifts=validated["night_shifts"],
+                    leader_shifts=validated["leader_shifts"],
+                    pgd_shifts=validated["pgd_shifts"],
+                )
+                session.add(defaults)
+            else:
+                for field, value in validated.items():
+                    setattr(defaults, field, value)
+
+            session.commit()
+            session.refresh(defaults)
+            return jsonify(_serialize_shift_defaults(defaults, year, month))
+    except Exception as exc:  # pragma: no cover - defensive guard
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": f"Internal error: {exc.__class__.__name__}: {exc}",
+                }
+            ),
             500,
         )
 
