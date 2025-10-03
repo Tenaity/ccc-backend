@@ -10,7 +10,7 @@ All routes are rooted at `http://localhost:8000`. Unless noted otherwise respons
 - `GET /api/rules/expected` — expected staffing counts for the selected month (`year`, `month` query params)
 
 ## Staff
-- `GET /api/staff` — list staff records
+- `GET /api/staff` — list staff records (supports `department_id`, `role`, `q` filters)
 - `POST /api/staff` — create staff (`full_name`, `role`, `can_night`, `base_quota`, `notes`)
 - `DELETE /api/staff/{id}` — remove staff
 
@@ -33,7 +33,9 @@ All routes are rooted at `http://localhost:8000`. Unless noted otherwise respons
 - `DELETE /api/holidays/{id}` — delete holiday
 - `POST /api/holidays/import?year=YYYY&source=nager` — import official VN holidays from Nager.Date
 
-## Schedule and assignments
+- `GET /api/departments` — list departments (use `active=1` for active subset)
+- `GET /api/schedule` — list assignments for the month (`year`, `month`, optional `department_id`)
+- `GET /api/schedule/overview` — aggregated coverage by department (`year`, `month`)
 - `GET /api/assignments` — list generated assignments for the month (`year`, `month`)
 - `GET /api/schedule/validate` — validate current schedule data for the month
 - `GET /api/schedule/estimate` — estimator for staffing expectations

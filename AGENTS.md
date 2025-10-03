@@ -5,6 +5,11 @@ SQLite via SQLAlchemy; migrations via `make migrate`. Models: `Staff`, `Assignme
 
 ## Phase 1 & 2: Multi-Department Support (COMPLETED)
 
+## Phase 3: Schedule Reporting (IN PROGRESS)
+
+- 2024-05-07: Added department-active listing plus schedule reporting APIs (`GET /api/departments?active=1`, `/api/schedule`, `/api/schedule/overview`) with unit tests for filtering, counts, and coverage summaries.
+
+
 ### Overview
 Added department management and custom shift configuration to support multiple departments with different shift requirements.
 
