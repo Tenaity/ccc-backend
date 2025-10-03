@@ -7,11 +7,13 @@ import os
 import pathlib
 import urllib.error
 import urllib.request
+from collections import defaultdict
 from datetime import date, timedelta
 
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 from flask_cors import CORS
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
+from sqlalchemy.orm import selectinload
 
 from dotenv import load_dotenv
 
@@ -374,10 +376,38 @@ def ping():
 @app.get("/api/departments")
 def list_departments():
     """Get all departments."""
+
+    active_raw = request.args.get("active")
+    active_filter: bool | None = None
+    if active_raw is not None:
+        raw = active_raw.strip().lower()
+        if raw in {"1", "true", "yes"}:
+            active_filter = True
+        elif raw in {"0", "false", "no"}:
+            active_filter = False
+        else:
+            return jsonify({"error": "active must be truthy (1/true) or falsy (0/false)"}), 400
+
     with SessionLocal() as s:
-        rows = s.execute(select(Department).order_by(Department.name)).scalars().all()
-        return jsonify(
-            [
+        query = select(Department).order_by(Department.name)
+        if active_filter is not None:
+            query = query.where(Department.is_active.is_(active_filter))
+        rows = s.execute(query).scalars().all()
+
+        if active_filter is not None:
+            payload = [
+                {
+                    "id": r.id,
+                    "name": r.name,
+                    "code": r.code,
+                    "color": r.color,
+                    "icon": r.icon,
+                    "settings": r.settings,
+                }
+                for r in rows
+            ]
+        else:
+            payload = [
                 {
                     "id": r.id,
                     "name": r.name,
@@ -392,7 +422,8 @@ def list_departments():
                 }
                 for r in rows
             ]
-        )
+
+        return jsonify(payload)
 
 
 @app.post("/api/departments")
@@ -690,12 +721,25 @@ def shifts():
 def list_staff():
     """Get all staff, optionally filtered by department."""
     dept_id = request.args.get("department_id", type=int)
+    role_filter_raw = request.args.get("role")
+    query_raw = request.args.get("q", "").strip()
 
     with SessionLocal() as s:
-        query = select(Staff)
+        query = select(Staff).options(selectinload(Staff.department))
 
-        if dept_id:
+        if dept_id is not None:
             query = query.where(Staff.department_id == dept_id)
+
+        if role_filter_raw:
+            roles = {item.strip().upper() for item in role_filter_raw.split(",") if item.strip()}
+            if roles:
+                query = query.where(func.upper(Staff.role).in_(sorted(roles)))
+
+        if query_raw:
+            pattern = f"%{query_raw.lower()}%"
+            query = query.where(func.lower(Staff.full_name).like(pattern))
+
+        query = query.order_by(func.lower(Staff.full_name))
 
         rows = s.execute(query).scalars().all()
         return jsonify(
@@ -713,6 +757,165 @@ def list_staff():
                 for r in rows
             ]
         )
+
+
+def _month_range(year: int, month: int) -> tuple[date, date]:
+    last_day = month_last_day(year, month)
+    start = date(year, month, 1)
+    end = date(year, month, last_day)
+    return start, end
+
+
+@app.get("/api/schedule")
+def get_schedule():
+    """Return assignments for a month with optional department filtering."""
+
+    try:
+        year, month = _parse_year_month(request.args.get("year"), request.args.get("month"))
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+
+    dept_id = request.args.get("department_id", type=int)
+    start, end = _month_range(year, month)
+
+    with SessionLocal() as s:
+        if dept_id is not None:
+            dept = s.get(Department, dept_id)
+            if not dept or not dept.is_active:
+                return {"error": "Department not found or inactive"}, 404
+
+        query = (
+            select(
+                Assignment.day,
+                Assignment.shift_code,
+                Assignment.position,
+                Assignment.staff_id,
+                Staff.full_name,
+                Staff.role,
+                Staff.department_id,
+                Department.name,
+            )
+            .join(Staff, Assignment.staff_id == Staff.id, isouter=True)
+            .join(Department, Staff.department_id == Department.id, isouter=True)
+            .where(Assignment.day.between(start, end))
+            .order_by(Assignment.day, Assignment.shift_code, Assignment.id)
+        )
+
+        if dept_id is not None:
+            query = query.where(Staff.department_id == dept_id)
+
+        rows = s.execute(query).all()
+
+    items: list[dict] = []
+    counts: dict[str, object] = {
+        "total": 0,
+        "by_shift": defaultdict(int),
+        "leaders": {"day": 0, "night": 0},
+    }
+
+    for day, shift_code, position, staff_id, full_name, role, row_dept_id, dept_name in rows:
+        items.append(
+            {
+                "day": day.isoformat(),
+                "shift_code": shift_code,
+                "position": position,
+                "staff_id": staff_id,
+                "staff_name": full_name,
+                "role": role,
+                "department_id": row_dept_id,
+                "department_name": dept_name,
+            }
+        )
+        counts["total"] += 1
+        counts["by_shift"][shift_code] += 1
+        if shift_code == "K" and (position or "").upper() == "TD":
+            counts["leaders"]["day"] += 1
+        if shift_code == "Đ" and (position or "").upper() == "TD":
+            counts["leaders"]["night"] += 1
+
+    counts["by_shift"] = dict(counts["by_shift"])
+
+    return jsonify({"items": items, "counts": counts})
+
+
+@app.get("/api/schedule/overview")
+def schedule_overview():
+    """Summarise schedule coverage per department for a month."""
+
+    try:
+        year, month = _parse_year_month(request.args.get("year"), request.args.get("month"))
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+
+    start, end = _month_range(year, month)
+    days_in_month = month_last_day(year, month)
+
+    with SessionLocal() as s:
+        departments = (
+            s.execute(select(Department).order_by(Department.name)).scalars().all()
+        )
+        rows = s.execute(
+            select(
+                Assignment.day,
+                Assignment.shift_code,
+                Assignment.position,
+                Staff.department_id,
+                Department.name,
+                Department.is_active,
+            )
+            .join(Staff, Assignment.staff_id == Staff.id, isouter=True)
+            .join(Department, Staff.department_id == Department.id, isouter=True)
+            .where(Assignment.day.between(start, end))
+        ).all()
+
+    overview: dict[int, dict[str, object]] = {}
+    day_presence: dict[int, set[date]] = defaultdict(set)
+    day_shifts: dict[int, dict[str, set[date]]] = defaultdict(lambda: {"day": set(), "night": set()})
+    leader_flags: dict[int, dict[str, set[date]]] = defaultdict(lambda: {"day": set(), "night": set()})
+
+    for dept in departments:
+        if not dept.is_active:
+            continue
+        overview[dept.id] = {
+            "department_id": dept.id,
+            "name": dept.name,
+            "shifts": 0,
+            "missing_leaders": 0,
+            "coverage_rate": 0.0,
+        }
+
+    for day, shift_code, position, dept_id, dept_name, is_active in rows:
+        if dept_id is None or dept_id not in overview:
+            continue
+        info = overview[dept_id]
+        info["shifts"] += 1
+        day_presence[dept_id].add(day)
+        if shift_code == "K":
+            day_shifts[dept_id]["day"].add(day)
+            if (position or "").upper() == "TD":
+                leader_flags[dept_id]["day"].add(day)
+        elif shift_code == "Đ":
+            day_shifts[dept_id]["night"].add(day)
+            if (position or "").upper() == "TD":
+                leader_flags[dept_id]["night"].add(day)
+
+    for dept_id, info in overview.items():
+        covered_days = len(day_presence.get(dept_id, set()))
+        info["coverage_rate"] = round(
+            covered_days / days_in_month if days_in_month else 0.0,
+            4,
+        )
+
+        missing = 0
+        for bucket in ("day", "night"):
+            shift_days = day_shifts[dept_id][bucket]
+            leaders = leader_flags[dept_id][bucket]
+            for day in shift_days:
+                if day not in leaders:
+                    missing += 1
+        info["missing_leaders"] = missing
+
+    return jsonify(sorted(overview.values(), key=lambda item: item["name"]))
 
 
 @app.post("/api/staff")
