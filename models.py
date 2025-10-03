@@ -180,6 +180,9 @@ class Staff(Base):
     off_days: Mapped[List["OffDay"]] = relationship(
         back_populates="staff", cascade="all, delete-orphan"
     )
+    preferences: Mapped[Optional["StaffPreferences"]] = relationship(
+        back_populates="staff", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class FixedAssignment(Base):
@@ -199,6 +202,50 @@ class OffDay(Base):
     day: Mapped[date] = mapped_column(Date, nullable=False)
     reason: Mapped[Optional[str]] = mapped_column(String)
     staff: Mapped[Staff] = relationship(back_populates="off_days")
+
+
+class StaffPreferences(Base):
+    """Staff scheduling preferences for better work-life balance."""
+    __tablename__ = "staff_preferences"
+
+    staff_id: Mapped[int] = mapped_column(
+        ForeignKey("staff.id", ondelete="CASCADE"),
+        primary_key=True
+    )
+
+    # Preferred shift codes (e.g., ["K", "CA1"] - prefer day shifts)
+    preferred_shifts: Mapped[Optional[str]] = mapped_column(
+        JSON,
+        nullable=True,
+        server_default='[]'
+    )
+
+    # Unavailable dates (e.g., ["2025-10-15", "2025-10-20"])
+    unavailable_days: Mapped[Optional[str]] = mapped_column(
+        JSON,
+        nullable=True,
+        server_default='[]'
+    )
+
+    # Maximum consecutive working days before needing a break
+    max_consecutive_days: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        default=6
+    )
+
+    # Preferred days off (0=Monday, 6=Sunday) - e.g., [5, 6] for weekends
+    preferred_days_off: Mapped[Optional[str]] = mapped_column(
+        JSON,
+        nullable=True,
+        server_default='[]'
+    )
+
+    # Additional notes about preferences
+    notes: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    # Relationship
+    staff: Mapped[Staff] = relationship(back_populates="preferences")
 
 
 class Assignment(Base):

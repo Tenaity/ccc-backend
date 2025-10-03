@@ -16,6 +16,7 @@ from rules.base import RuleProfile
 from scheduler.placements import Planned, after_place, place
 from scheduler.repo import load_fixed, load_holidays, load_locked, load_staff
 from scheduler.utils import month_last_day, ymd
+from scheduler.preferences_adapter import PreferencesAdapter
 
 ShiftCode = str
 Position = Optional[str]
@@ -25,7 +26,7 @@ TOLERANCE = 0.9  # lệch công cho phép
 
 @dataclass
 class Context:
-    # ===== dữ liệu “quy tắc”
+    # ===== dữ liệu "quy tắc"
     profile: RuleProfile
     credits: Dict[str, float]
 
@@ -58,6 +59,9 @@ class Context:
     # ===== cấu hình tháng
     working_day_target: float | None = None
     shift_plan_defaults: Dict[str, int] = field(default_factory=dict)
+
+    # ===== preferences adapter
+    preferences: Optional[PreferencesAdapter] = None
 
     # ===== accumulators
     credit_map: DefaultDict[int, float] = field(default_factory=lambda: defaultdict(float))
@@ -125,6 +129,9 @@ def build_context(
 
     base_quota = {st.id: float(getattr(st, "base_quota", 0.0)) for st in (TC + GDV1 + GDV2 + HC)}
 
+    # Initialize preferences adapter
+    preferences_adapter = PreferencesAdapter(s, year, month)
+
     ctx = Context(
         profile=profile,
         credits=credits,
@@ -143,6 +150,7 @@ def build_context(
         base_quota=base_quota,
         working_day_target=working_day_target,
         shift_plan_defaults=dict(shift_plan_defaults or {}),
+        preferences=preferences_adapter,
         rng=rng,
         save=save,
         session=s,

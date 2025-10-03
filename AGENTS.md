@@ -5,9 +5,128 @@ SQLite via SQLAlchemy; migrations via `make migrate`. Models: `Staff`, `Assignme
 
 ## Phase 1 & 2: Multi-Department Support (COMPLETED)
 
-## Phase 3: Schedule Reporting (IN PROGRESS)
+## Phase 3: Schedule Reporting (COMPLETED)
 
 - 2024-05-07: Added department-active listing plus schedule reporting APIs (`GET /api/departments?active=1`, `/api/schedule`, `/api/schedule/overview`) with unit tests for filtering, counts, and coverage summaries.
+
+## Phase 4: Staff Preferences & Work-Life Balance (COMPLETED)
+
+### Overview
+Implemented staff scheduling preferences to improve work-life balance and staff satisfaction. The scheduler now considers individual preferences when assigning shifts.
+
+### Backend Changes
+
+#### New Model (models.py)
+**StaffPreferences Model**:
+```python
+- staff_id: Integer (PK, FK -> Staff)
+- preferred_shifts: JSON - Array of preferred shift codes (e.g., ["K", "CA1"])
+- unavailable_days: JSON - Array of ISO dates staff cannot work (e.g., ["2025-10-15"])
+- max_consecutive_days: Integer - Max working days before rest (default 6)
+- preferred_days_off: JSON - Array of weekday numbers 0-6 (e.g., [5, 6] for Sat/Sun)
+- notes: String - Additional preference notes
+```
+
+#### New Scheduler Components
+
+**PreferencesAdapter** (`scheduler/preferences_adapter.py`):
+- Loads and caches staff preferences from database
+- Methods:
+  * `is_preferred_shift(staff_id, shift_code)` - Check if shift is preferred
+  * `is_unavailable(staff_id, day)` - Hard constraint check
+  * `is_preferred_day_off(staff_id, day)` - Soft preference check
+  * `calculate_preference_weight(...)` - Calculate match score
+  * `filter_available_staff(...)` - Remove unavailable staff
+  * `sort_by_preference(...)` - Sort by preference weight
+
+**Preferences Helper** (`scheduler/engine/preferences_helper.py`):
+- Integration helpers for phase_day and phase_night
+- Functions:
+  * `filter_by_preferences(ctx, candidates, day, shift_code)` - Filter & sort
+  * `filter_queue_by_preferences(...)` - Queue filtering with preferences
+  * `get_preferred_staff_for_shift(...)` - Get staff who prefer specific shift
+  * `should_skip_due_to_preferences(...)` - Check hard constraints
+
+**Context Integration** (`scheduler/engine/core.py`):
+- Added `preferences: Optional[PreferencesAdapter]` to Context dataclass
+- Initialized in `build_context()` function
+- Available as `ctx.preferences` throughout engine
+
+#### Preference Weight Scoring
+- Unavailable (hard): -1000 (blocked)
+- Preferred shift: +10
+- Not on preferred day off: +2
+- On preferred day off: -5
+- Below max consecutive: +3
+- Above max consecutive: -8
+
+#### New APIs (app.py)
+- `GET /api/staff/<id>/preferences` - Get staff preferences (lines 991-1018)
+- `PUT /api/staff/<id>/preferences` - Update preferences (lines 1021-1095)
+
+### Frontend Changes
+
+#### New Page
+**StaffPreferences.tsx** (`/staff-preferences`):
+- Premium glass-morphism UI
+- Staff selector dropdown with department info
+- 3 tabbed sections:
+  1. **Shift Preferences**: Day/Night shift preferences with priority
+  2. **Day Off Preferences**: Weekday selection (Mon-Sun)
+  3. **Constraints**: Max consecutive days, min rest days
+- Save/Reset functionality
+
+#### Routing Updates
+- Added to Schedule submenu in `routes.tsx`
+- Route: `/staff-preferences`
+- Icon: UserCog
+- Lazy-loaded in `App.tsx`
+
+### Integration Documentation
+See `scheduler/PREFERENCES_INTEGRATION.md` for:
+- Architecture overview
+- Usage examples
+- Integration patterns for phase_day/phase_night
+- Testing guidelines
+- Future enhancement ideas
+
+### How It Works
+
+1. **Configuration Phase**: Staff set preferences via `/staff-preferences` UI
+2. **Schedule Generation**:
+   - Preferences loaded into `ctx.preferences` adapter
+   - Each staff assignment checks:
+     * Hard constraint: Unavailable days (blocks assignment)
+     * Soft constraints: Preferred shifts, days off, consecutive limits
+   - Weight score calculated for each candidate
+   - Higher-weighted candidates preferred (but quota/coverage priority)
+3. **Result**: Better work-life balance while maintaining coverage
+
+### Usage Pattern
+```python
+# In phase_day or phase_night:
+from scheduler.engine.preferences_helper import filter_by_preferences
+
+candidates = filter_by_preferences(ctx, all_staff, day, shift_code)
+if candidates:
+    best_match = candidates[0]
+    ctx.do_place(day, best_match.id, shift_code, position)
+```
+
+### Testing Status
+- ✅ Models and API endpoints created
+- ✅ PreferencesAdapter implemented with caching
+- ✅ Helper functions for engine integration
+- ✅ Context integration completed
+- ✅ Frontend UI completed
+- ✅ Documentation created
+- ⚠️ Phase integration optional (helpers ready for use)
+
+### Notes
+- Preferences are **soft constraints** (except unavailable days)
+- Quota and coverage requirements take priority
+- Staff should understand preferences are considered but not guaranteed
+- Future: Track preference satisfaction metrics
 
 
 ### Overview

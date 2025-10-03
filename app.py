@@ -940,6 +940,43 @@ def add_staff():
         }
 
 
+@app.put("/api/staff/<int:staff_id>")
+def update_staff(staff_id: int):
+    """Update an existing staff member."""
+    data = request.get_json(force=True)
+    with SessionLocal() as s:
+        r = s.get(Staff, staff_id)
+        if not r:
+            return {"error": "Staff not found"}, 404
+
+        # Update fields
+        if "full_name" in data:
+            r.full_name = data["full_name"]
+        if "role" in data:
+            r.role = data["role"]
+        if "can_night" in data:
+            r.can_night = bool(data["can_night"])
+        if "base_quota" in data:
+            r.base_quota = float(data["base_quota"])
+        if "notes" in data:
+            r.notes = data["notes"]
+        if "department_id" in data:
+            r.department_id = data["department_id"]
+
+        s.commit()
+        s.refresh(r)
+        return {
+            "id": r.id,
+            "full_name": r.full_name,
+            "role": r.role,
+            "can_night": r.can_night,
+            "base_quota": r.base_quota,
+            "notes": r.notes,
+            "department_id": r.department_id,
+            "department_name": r.department.name if r.department else None,
+        }
+
+
 @app.delete("/api/staff/<int:staff_id>")
 def del_staff(staff_id: int):
     with SessionLocal() as s:
@@ -949,6 +986,121 @@ def del_staff(staff_id: int):
         s.delete(r)
         s.commit()
         return {"ok": True}
+
+
+@app.get("/api/staff/<int:staff_id>/preferences")
+def get_staff_preferences(staff_id: int):
+    """Get scheduling preferences for a staff member."""
+    with SessionLocal() as s:
+        staff = s.get(Staff, staff_id)
+        if not staff:
+            return {"error": "Staff not found"}, 404
+
+        prefs = staff.preferences
+        if not prefs:
+            # Return default empty preferences
+            return {
+                "staff_id": staff_id,
+                "preferred_shifts": [],
+                "unavailable_days": [],
+                "max_consecutive_days": 6,
+                "preferred_days_off": [],
+                "notes": None,
+            }
+
+        return {
+            "staff_id": prefs.staff_id,
+            "preferred_shifts": prefs.preferred_shifts or [],
+            "unavailable_days": prefs.unavailable_days or [],
+            "max_consecutive_days": prefs.max_consecutive_days,
+            "preferred_days_off": prefs.preferred_days_off or [],
+            "notes": prefs.notes,
+        }
+
+
+@app.put("/api/staff/<int:staff_id>/preferences")
+def update_staff_preferences(staff_id: int):
+    """Upsert scheduling preferences for a staff member."""
+    from models import StaffPreferences
+    from datetime import datetime
+
+    data = request.get_json(force=True)
+
+    # Validation
+    preferred_shifts = data.get("preferred_shifts", [])
+    unavailable_days = data.get("unavailable_days", [])
+    max_consecutive_days = data.get("max_consecutive_days")
+    preferred_days_off = data.get("preferred_days_off", [])
+    notes = data.get("notes")
+
+    # Validate max_consecutive_days
+    if max_consecutive_days is not None:
+        try:
+            max_consecutive_days = int(max_consecutive_days)
+            if max_consecutive_days < 0:
+                return {"error": "max_consecutive_days must be >= 0"}, 400
+        except (ValueError, TypeError):
+            return {"error": "max_consecutive_days must be a number"}, 400
+
+    # Validate unavailable_days (ISO date format)
+    for day_str in unavailable_days:
+        try:
+            datetime.fromisoformat(day_str)
+        except (ValueError, TypeError):
+            return {"error": f"Invalid date format: {day_str}. Use YYYY-MM-DD"}, 400
+
+    # Validate preferred_days_off (0-6)
+    for day_num in preferred_days_off:
+        if not isinstance(day_num, int) or day_num < 0 or day_num > 6:
+            return {"error": f"Invalid day number: {day_num}. Must be 0-6 (Mon-Sun)"}, 400
+
+    # Validate preferred_shifts against department's shift configs
+    with SessionLocal() as s:
+        staff = s.get(Staff, staff_id)
+        if not staff:
+            return {"error": "Staff not found"}, 404
+
+        if staff.department_id and preferred_shifts:
+            from sqlalchemy import select
+            from models import ShiftConfig
+
+            valid_shift_codes = set(
+                s.execute(
+                    select(ShiftConfig.code)
+                    .where(ShiftConfig.department_id == staff.department_id)
+                    .where(ShiftConfig.is_active == True)
+                ).scalars().all()
+            )
+
+            for shift_code in preferred_shifts:
+                if shift_code not in valid_shift_codes:
+                    return {
+                        "error": f"Invalid shift code '{shift_code}' for department. Valid codes: {sorted(valid_shift_codes)}"
+                    }, 400
+
+        # Upsert preferences
+        prefs = staff.preferences
+        if not prefs:
+            prefs = StaffPreferences(staff_id=staff_id)
+            s.add(prefs)
+
+        prefs.preferred_shifts = preferred_shifts
+        prefs.unavailable_days = unavailable_days
+        prefs.max_consecutive_days = max_consecutive_days
+        prefs.preferred_days_off = preferred_days_off
+        prefs.notes = notes
+
+        s.commit()
+        s.refresh(prefs)
+
+        return {
+            "staff_id": prefs.staff_id,
+            "preferred_shifts": prefs.preferred_shifts or [],
+            "unavailable_days": prefs.unavailable_days or [],
+            "max_consecutive_days": prefs.max_consecutive_days,
+            "preferred_days_off": prefs.preferred_days_off or [],
+            "notes": prefs.notes,
+        }
 
 
 @app.get("/api/fixed")
