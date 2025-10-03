@@ -20,10 +20,12 @@ load_dotenv()
 from api.export_month_csv import export_month_csv as _export_month_csv
 from models import (
     Assignment,
+    Department,
     FixedAssignment,
     Holiday,
     MonthConfig,
     OffDay,
+    ShiftConfig,
     ShiftPlanDefaults,
     SessionLocal,
     Staff,
@@ -334,6 +336,320 @@ def ping():
     return {"ok": True}
 
 
+# ===========================================
+# Department Management APIs
+# ===========================================
+
+@app.get("/api/departments")
+def list_departments():
+    """Get all departments."""
+    with SessionLocal() as s:
+        rows = s.execute(select(Department).order_by(Department.name)).scalars().all()
+        return jsonify(
+            [
+                {
+                    "id": r.id,
+                    "name": r.name,
+                    "code": r.code,
+                    "color": r.color,
+                    "icon": r.icon,
+                    "description": r.description,
+                    "is_active": r.is_active,
+                    "settings": r.settings,
+                    "staff_count": len(r.staff) if r.staff else 0,
+                    "shift_count": len(r.shifts) if r.shifts else 0,
+                }
+                for r in rows
+            ]
+        )
+
+
+@app.post("/api/departments")
+def create_department():
+    """Create a new department."""
+    data = request.get_json() or {}
+    name = data.get("name", "").strip()
+    code = data.get("code", "").strip().upper()
+
+    if not name:
+        return jsonify({"error": "Department name is required"}), 400
+    if not code:
+        return jsonify({"error": "Department code is required"}), 400
+
+    with SessionLocal() as s:
+        # Check duplicates
+        existing = s.execute(
+            select(Department).where(
+                (Department.name == name) | (Department.code == code)
+            )
+        ).scalar_one_or_none()
+
+        if existing:
+            return jsonify({"error": "Department name or code already exists"}), 400
+
+        dept = Department(
+            name=name,
+            code=code,
+            color=data.get("color", "#3b82f6"),
+            icon=data.get("icon", "Building2"),
+            description=data.get("description"),
+            is_active=data.get("is_active", True),
+            settings=data.get("settings", {
+                "working_hours": {"start": "08:00", "end": "17:00"},
+                "weekend_policy": "sat_off",
+                "max_hours_per_month": 208,
+                "min_staff_per_shift": 2,
+            }),
+        )
+        s.add(dept)
+        s.commit()
+        s.refresh(dept)
+
+        return jsonify({
+            "id": dept.id,
+            "name": dept.name,
+            "code": dept.code,
+            "color": dept.color,
+            "icon": dept.icon,
+            "description": dept.description,
+            "is_active": dept.is_active,
+            "settings": dept.settings,
+        }), 201
+
+
+@app.put("/api/departments/<int:dept_id>")
+def update_department(dept_id: int):
+    """Update a department."""
+    data = request.get_json() or {}
+
+    with SessionLocal() as s:
+        dept = s.get(Department, dept_id)
+        if not dept:
+            return jsonify({"error": "Department not found"}), 404
+
+        # Update fields
+        if "name" in data:
+            name = data["name"].strip()
+            if not name:
+                return jsonify({"error": "Department name cannot be empty"}), 400
+            dept.name = name
+
+        if "code" in data:
+            code = data["code"].strip().upper()
+            if not code:
+                return jsonify({"error": "Department code cannot be empty"}), 400
+            dept.code = code
+
+        if "color" in data:
+            dept.color = data["color"]
+        if "icon" in data:
+            dept.icon = data["icon"]
+        if "description" in data:
+            dept.description = data["description"]
+        if "is_active" in data:
+            dept.is_active = data["is_active"]
+        if "settings" in data:
+            dept.settings = data["settings"]
+
+        s.commit()
+        s.refresh(dept)
+
+        return jsonify({
+            "id": dept.id,
+            "name": dept.name,
+            "code": dept.code,
+            "color": dept.color,
+            "icon": dept.icon,
+            "description": dept.description,
+            "is_active": dept.is_active,
+            "settings": dept.settings,
+        })
+
+
+@app.delete("/api/departments/<int:dept_id>")
+def delete_department(dept_id: int):
+    """Delete a department."""
+    with SessionLocal() as s:
+        dept = s.get(Department, dept_id)
+        if not dept:
+            return jsonify({"error": "Department not found"}), 404
+
+        # Check if department has staff
+        if dept.staff and len(dept.staff) > 0:
+            return jsonify({
+                "error": f"Cannot delete department with {len(dept.staff)} staff members. Please reassign or remove staff first."
+            }), 400
+
+        s.delete(dept)
+        s.commit()
+        return jsonify({"ok": True})
+
+
+# ===========================================
+# Shift Config APIs
+# ===========================================
+
+@app.get("/api/shift-configs")
+def list_shift_configs():
+    """Get all shift configurations, optionally filtered by department."""
+    dept_id = request.args.get("department_id", type=int)
+
+    with SessionLocal() as s:
+        query = select(ShiftConfig).order_by(
+            ShiftConfig.department_id,
+            ShiftConfig.display_order,
+            ShiftConfig.name
+        )
+
+        if dept_id:
+            query = query.where(ShiftConfig.department_id == dept_id)
+
+        rows = s.execute(query).scalars().all()
+        return jsonify(
+            [
+                {
+                    "id": r.id,
+                    "department_id": r.department_id,
+                    "department_name": r.department.name if r.department else None,
+                    "name": r.name,
+                    "code": r.code,
+                    "start_time": r.start_time,
+                    "end_time": r.end_time,
+                    "color": r.color,
+                    "icon": r.icon,
+                    "is_active": r.is_active,
+                    "display_order": r.display_order,
+                    "rules": r.rules,
+                }
+                for r in rows
+            ]
+        )
+
+
+@app.post("/api/shift-configs")
+def create_shift_config():
+    """Create a new shift configuration."""
+    data = request.get_json() or {}
+    dept_id = data.get("department_id")
+    name = data.get("name", "").strip()
+    code = data.get("code", "").strip().upper()
+
+    if not dept_id:
+        return jsonify({"error": "department_id is required"}), 400
+    if not name:
+        return jsonify({"error": "Shift name is required"}), 400
+    if not code:
+        return jsonify({"error": "Shift code is required"}), 400
+
+    with SessionLocal() as s:
+        # Check if department exists
+        dept = s.get(Department, dept_id)
+        if not dept:
+            return jsonify({"error": "Department not found"}), 404
+
+        # Check for duplicate code in same department
+        existing = s.execute(
+            select(ShiftConfig).where(
+                (ShiftConfig.department_id == dept_id) &
+                (ShiftConfig.code == code)
+            )
+        ).scalar_one_or_none()
+
+        if existing:
+            return jsonify({"error": f"Shift code '{code}' already exists in this department"}), 400
+
+        shift = ShiftConfig(
+            department_id=dept_id,
+            name=name,
+            code=code,
+            start_time=data.get("start_time", "08:00"),
+            end_time=data.get("end_time", "17:00"),
+            color=data.get("color", "#60a5fa"),
+            icon=data.get("icon", "Sun"),
+            is_active=data.get("is_active", True),
+            display_order=data.get("display_order", 0),
+            rules=data.get("rules", {}),
+        )
+        s.add(shift)
+        s.commit()
+        s.refresh(shift)
+
+        return jsonify({
+            "id": shift.id,
+            "department_id": shift.department_id,
+            "name": shift.name,
+            "code": shift.code,
+            "start_time": shift.start_time,
+            "end_time": shift.end_time,
+            "color": shift.color,
+            "icon": shift.icon,
+            "is_active": shift.is_active,
+            "display_order": shift.display_order,
+            "rules": shift.rules,
+        }), 201
+
+
+@app.put("/api/shift-configs/<int:shift_id>")
+def update_shift_config(shift_id: int):
+    """Update a shift configuration."""
+    data = request.get_json() or {}
+
+    with SessionLocal() as s:
+        shift = s.get(ShiftConfig, shift_id)
+        if not shift:
+            return jsonify({"error": "Shift configuration not found"}), 404
+
+        # Update fields
+        if "name" in data:
+            shift.name = data["name"].strip()
+        if "code" in data:
+            shift.code = data["code"].strip().upper()
+        if "start_time" in data:
+            shift.start_time = data["start_time"]
+        if "end_time" in data:
+            shift.end_time = data["end_time"]
+        if "color" in data:
+            shift.color = data["color"]
+        if "icon" in data:
+            shift.icon = data["icon"]
+        if "is_active" in data:
+            shift.is_active = data["is_active"]
+        if "display_order" in data:
+            shift.display_order = data["display_order"]
+        if "rules" in data:
+            shift.rules = data["rules"]
+
+        s.commit()
+        s.refresh(shift)
+
+        return jsonify({
+            "id": shift.id,
+            "department_id": shift.department_id,
+            "name": shift.name,
+            "code": shift.code,
+            "start_time": shift.start_time,
+            "end_time": shift.end_time,
+            "color": shift.color,
+            "icon": shift.icon,
+            "is_active": shift.is_active,
+            "display_order": shift.display_order,
+            "rules": shift.rules,
+        })
+
+
+@app.delete("/api/shift-configs/<int:shift_id>")
+def delete_shift_config(shift_id: int):
+    """Delete a shift configuration."""
+    with SessionLocal() as s:
+        shift = s.get(ShiftConfig, shift_id)
+        if not shift:
+            return jsonify({"error": "Shift configuration not found"}), 404
+
+        s.delete(shift)
+        s.commit()
+        return jsonify({"ok": True})
+
+
 @app.get("/api/shifts")
 def shifts():
     return jsonify(SHIFT_DEFS)
@@ -341,8 +657,16 @@ def shifts():
 
 @app.get("/api/staff")
 def list_staff():
+    """Get all staff, optionally filtered by department."""
+    dept_id = request.args.get("department_id", type=int)
+
     with SessionLocal() as s:
-        rows = s.execute(select(Staff)).scalars().all()
+        query = select(Staff)
+
+        if dept_id:
+            query = query.where(Staff.department_id == dept_id)
+
+        rows = s.execute(query).scalars().all()
         return jsonify(
             [
                 {
@@ -352,6 +676,8 @@ def list_staff():
                     "can_night": r.can_night,
                     "base_quota": r.base_quota,
                     "notes": r.notes,
+                    "department_id": r.department_id,
+                    "department_name": r.department.name if r.department else None,
                 }
                 for r in rows
             ]
@@ -368,10 +694,16 @@ def add_staff():
             can_night=bool(data.get("can_night", True)),
             base_quota=float(data.get("base_quota", 26.0)),
             notes=data.get("notes"),
+            department_id=data.get("department_id"),
         )
         s.add(r)
         s.commit()
-        return {"id": r.id}
+        s.refresh(r)
+        return {
+            "id": r.id,
+            "full_name": r.full_name,
+            "department_id": r.department_id,
+        }
 
 
 @app.delete("/api/staff/<int:staff_id>")

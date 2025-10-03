@@ -91,6 +91,72 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 Base = declarative_base()
 
 
+class Department(Base):
+    """Department model for multi-department support."""
+    __tablename__ = "department"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    code: Mapped[str] = mapped_column(String, nullable=False, unique=True)  # Short code like "CC", "IT"
+    color: Mapped[str] = mapped_column(String, default="#3b82f6")  # Hex color for UI
+    icon: Mapped[str] = mapped_column(String, default="Building2")  # Lucide icon name
+    description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Settings stored as JSON
+    settings: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+        default=lambda: {
+            "working_hours": {"start": "08:00", "end": "17:00"},
+            "weekend_policy": "sat_off",
+            "max_hours_per_month": 208,
+            "min_staff_per_shift": 2,
+        },
+        server_default='{"working_hours": {"start": "08:00", "end": "17:00"}, "weekend_policy": "sat_off", "max_hours_per_month": 208, "min_staff_per_shift": 2}'
+    )
+
+    # Relationships
+    staff: Mapped[List["Staff"]] = relationship(
+        back_populates="department", cascade="all, delete-orphan"
+    )
+    shifts: Mapped[List["ShiftConfig"]] = relationship(
+        back_populates="department", cascade="all, delete-orphan"
+    )
+
+
+class ShiftConfig(Base):
+    """Custom shift configuration per department."""
+    __tablename__ = "shift_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    department_id: Mapped[int] = mapped_column(ForeignKey("department.id", ondelete="CASCADE"))
+
+    name: Mapped[str] = mapped_column(String, nullable=False)  # "Ca Sáng"
+    code: Mapped[str] = mapped_column(String, nullable=False)  # "CS" (for display on matrix)
+    start_time: Mapped[str] = mapped_column(String, nullable=False)  # "08:00"
+    end_time: Mapped[str] = mapped_column(String, nullable=False)  # "17:00"
+    color: Mapped[str] = mapped_column(String, default="#60a5fa")  # Pastel color
+    icon: Mapped[str] = mapped_column(String, default="Sun")  # Lucide icon
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    display_order: Mapped[int] = mapped_column(Integer, default=0)  # For sorting
+
+    # Rules stored as JSON
+    rules: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+        default=lambda: {},
+        server_default='{}'
+    )
+
+    # Relationship
+    department: Mapped[Department] = relationship(back_populates="shifts")
+
+    __table_args__ = (
+        UniqueConstraint("department_id", "code", name="uq_shift_config_dept_code"),
+    )
+
+
 class Staff(Base):
     __tablename__ = "staff"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -100,6 +166,14 @@ class Staff(Base):
     base_quota: Mapped[float] = mapped_column(Float, default=26.0)  # công chuẩn/tháng
     notes: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
+    # Department FK (nullable for backward compatibility)
+    department_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("department.id", ondelete="SET NULL"),
+        nullable=True
+    )
+
+    # Relationships
+    department: Mapped[Optional[Department]] = relationship(back_populates="staff")
     fixed_assignments: Mapped[List["FixedAssignment"]] = relationship(
         back_populates="staff", cascade="all, delete-orphan"
     )
@@ -280,4 +354,13 @@ def init_db():
             with engine.begin() as conn:
                 conn.exec_driver_sql(
                     "ALTER TABLE fixed_assignment ADD COLUMN position VARCHAR NULL"
+                )
+
+    # --- Migration: add department_id to staff table ---
+    if "staff" in tables:
+        staff_cols = {col["name"] for col in insp.get_columns("staff")}
+        if "department_id" not in staff_cols:
+            with engine.begin() as conn:
+                conn.exec_driver_sql(
+                    "ALTER TABLE staff ADD COLUMN department_id INTEGER NULL"
                 )
