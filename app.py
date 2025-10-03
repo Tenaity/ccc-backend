@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from api.export_month_csv import export_month_csv as _export_month_csv
+from api.metrics import load_department_comparison, load_staff_workload
 from models import (
     Assignment,
     Department,
@@ -147,6 +148,36 @@ def _parse_year_month(year_raw, month_raw) -> tuple[int, int]:
     if year < 1900 or year > 2100:
         raise ValueError("year must be between 1900 and 2100")
     return year, month
+
+
+def _get_cost_per_hour() -> float:
+    raw = os.getenv("LABOR_COST_PER_HOUR", "0").strip()
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _build_csv_response(filename: str, header: list[str], rows: list[list[object]]):
+    def generate():
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(header)
+        yield buf.getvalue()
+        buf.seek(0)
+        buf.truncate(0)
+        for row in rows:
+            writer.writerow(row)
+            yield buf.getvalue()
+            buf.seek(0)
+            buf.truncate(0)
+
+    response = Response(
+        stream_with_context(generate()),
+        content_type="text/csv; charset=utf-8",
+    )
+    response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+    return response
 
 
 def _coerce_extra_dates(
@@ -1564,6 +1595,155 @@ def export_month_csv_endpoint():
     if m < 1 or m > 12:
         return {"error": "month must be 1..12"}, 400
     return _export_month_csv(y, m)
+
+
+@app.get("/api/metrics/staff-workload")
+def metrics_staff_workload():
+    try:
+        year, month = _parse_year_month(
+            request.args.get("year"), request.args.get("month")
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+
+    data, totals = load_staff_workload(year, month)
+    return jsonify(
+        {
+            "by_staff": [
+                {
+                    "staff_id": row.staff_id,
+                    "name": row.name,
+                    "hours": row.hours,
+                    "night_hours": row.night_hours,
+                }
+                for row in data
+            ],
+            "totals": totals,
+        }
+    )
+
+
+@app.get("/api/metrics/department-compare")
+def metrics_department_compare():
+    try:
+        year, month = _parse_year_month(
+            request.args.get("year"), request.args.get("month")
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+
+    rows = load_department_comparison(year, month)
+    return jsonify(
+        {
+            "by_department": [
+                {
+                    "dept": row.dept,
+                    "staff_count": row.staff_count,
+                    "hours": row.hours,
+                    "overtime_hours": row.overtime_hours,
+                }
+                for row in rows
+            ]
+        }
+    )
+
+
+@app.get("/api/metrics/attendance")
+def metrics_attendance():
+    start_raw = request.args.get("from")
+    end_raw = request.args.get("to")
+    if not start_raw or not end_raw:
+        return {"error": "from and to required"}, 400
+
+    try:
+        start = date.fromisoformat(start_raw)
+        end = date.fromisoformat(end_raw)
+    except ValueError:
+        return {"error": "from/to must be YYYY-MM-DD"}, 400
+
+    if end < start:
+        return {"error": "to must be on or after from"}, 400
+
+    return jsonify({"rate": 0, "absences": [], "late": []})
+
+
+@app.get("/api/metrics/cost")
+def metrics_cost():
+    try:
+        year, month = _parse_year_month(
+            request.args.get("year"), request.args.get("month")
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+
+    _, totals = load_staff_workload(year, month)
+    cost = totals["hours"] * _get_cost_per_hour()
+    return jsonify({"labor_cost": cost})
+
+
+@app.get("/api/reports/staff-workload.csv")
+def export_staff_workload_csv():
+    try:
+        year, month = _parse_year_month(
+            request.args.get("year"), request.args.get("month")
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+
+    data, totals = load_staff_workload(year, month)
+    rows = [
+        [row.staff_id, row.name, f"{row.hours:.2f}", f"{row.night_hours:.2f}"]
+        for row in data
+    ]
+    if data:
+        rows.append(["TOTAL", "", f"{totals['hours']:.2f}", f"{totals['night_hours']:.2f}"])
+    return _build_csv_response(
+        f"staff-workload-{year:04d}-{month:02d}.csv",
+        ["staff_id", "name", "hours", "night_hours"],
+        rows,
+    )
+
+
+@app.get("/api/reports/department-compare.csv")
+def export_department_compare_csv():
+    try:
+        year, month = _parse_year_month(
+            request.args.get("year"), request.args.get("month")
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+
+    rows = load_department_comparison(year, month)
+    csv_rows = [
+        [
+            row.dept,
+            row.staff_count,
+            f"{row.hours:.2f}",
+            f"{row.overtime_hours:.2f}",
+        ]
+        for row in rows
+    ]
+    return _build_csv_response(
+        f"department-compare-{year:04d}-{month:02d}.csv",
+        ["department", "staff_count", "hours", "overtime_hours"],
+        csv_rows,
+    )
+
+
+@app.get("/api/reports/schedule-month.csv")
+def export_schedule_month_csv():
+    try:
+        year, month = _parse_year_month(
+            request.args.get("year"), request.args.get("month")
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+
+    response = _export_month_csv(year, month)
+    response.headers["Content-Disposition"] = (
+        f"attachment; filename=schedule-month-{year:04d}-{month:02d}.csv"
+    )
+    return response
 
 
 @app.get("/api/rules/expected")

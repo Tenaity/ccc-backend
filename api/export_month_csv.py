@@ -7,17 +7,9 @@ from typing import Optional
 
 from flask import Response, stream_with_context
 
-from models import Assignment, SessionLocal, Staff
+import models
 
-# Map shift code to credit value
-SHIFT_CREDIT = {
-    "CA1": 1,
-    "CA2": 1,
-    "K": 1.25,
-    "Đ": 1.5,
-    "HC": 1,
-    "P": 0,
-}
+from .constants import SHIFT_CREDIT
 
 _RANK_RE = re.compile(r"\[RANK:(1|2)\]")
 
@@ -39,19 +31,19 @@ def export_month_csv(year: int, month: int) -> Response:
     start = date(year, month, 1)
     end = date(year, month, last_day)
 
-    with SessionLocal() as s:
+    with models.SessionLocal() as s:
         rows = (
             s.query(
-                Assignment.day,
-                Staff.full_name,
-                Staff.role,
-                Staff.notes,
-                Assignment.shift_code,
-                Assignment.position,
+                models.Assignment.day,
+                models.Staff.full_name,
+                models.Staff.role,
+                models.Staff.notes,
+                models.Assignment.shift_code,
+                models.Assignment.position,
             )
-            .join(Staff, Assignment.staff_id == Staff.id)
-            .filter(Assignment.day.between(start, end))
-            .order_by(Assignment.day, Assignment.staff_id)
+            .join(models.Staff, models.Assignment.staff_id == models.Staff.id)
+            .filter(models.Assignment.day.between(start, end))
+            .order_by(models.Assignment.day, models.Assignment.staff_id)
             .all()
         )
 

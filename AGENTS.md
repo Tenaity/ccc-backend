@@ -158,6 +158,11 @@ Added department management and custom shift configuration to support multiple d
 - Exercise both happy-path & quota edge cases (locked staff, fixed Đ@TD, fairness 7-day window)
 - `backend/tests/test_export_month_csv.py` must assert CSV has non‑empty rows
 
+## Metrics & Reports
+- Dashboard metrics live under `/api/metrics/*` (staff workload, department compare, attendance stub, cost).
+- CSV exports for metrics are exposed at `/api/reports/*.csv`; reuse helpers to keep headers consistent.
+- `LABOR_COST_PER_HOUR` controls cost metric; defaults to 0 when unset. Update docs if you change this contract.
+
 ## Schedule Generation Flow
 
 ### Pre-requisites (Configuration Phase)
