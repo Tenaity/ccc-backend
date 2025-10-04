@@ -1,26 +1,5 @@
-import importlib
 import json
 from datetime import date
-from types import SimpleNamespace
-
-import pytest
-
-
-@pytest.fixture()
-def client(tmp_path, monkeypatch):
-    db_path = tmp_path / "holiday.db"
-    monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
-    import app as app_module
-    import models
-
-    importlib.reload(models)
-    models.init_db()
-    importlib.reload(app_module)
-    return SimpleNamespace(
-        client=app_module.app.test_client(),
-        models=models,
-        module=app_module,
-    )
 
 
 def test_holiday_crud(client):

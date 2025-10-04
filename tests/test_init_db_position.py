@@ -5,8 +5,15 @@ from datetime import date
 def test_init_db_adds_position_column(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
-    import models
 
+    # Reset database engine cache to pick up new DB_URL
+    from src.infrastructure.persistence import database as db_module
+    db_module.reset_engine()
+
+    # Reload database module to clear any cached state
+    importlib.reload(db_module)
+
+    import models
     importlib.reload(models)
 
     # Calling twice should be idempotent

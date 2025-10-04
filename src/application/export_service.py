@@ -1,3 +1,7 @@
+"""Export and CSV generation services."""
+
+from __future__ import annotations
+
 import calendar
 import csv
 import io
@@ -9,7 +13,15 @@ from flask import Response, stream_with_context
 
 import models
 
-from .constants import SHIFT_CREDIT
+# Shift credit mapping
+SHIFT_CREDIT = {
+    "CA1": 1,
+    "CA2": 1,
+    "K": 1.25,
+    "Đ": 1.5,
+    "HC": 1,
+    "P": 0,
+}
 
 _RANK_RE = re.compile(r"\[RANK:(1|2)\]")
 
@@ -62,9 +74,12 @@ def export_month_csv(year: int, month: int) -> Response:
             buf.seek(0)
             buf.truncate(0)
 
-    headers = {"Content-Disposition": f"attachment; filename=schedule-{year:04d}-{month:02d}.csv"}
+    headers = {"Content-Disposition": f"attachment; filename=schedule-month-{year:04d}-{month:02d}.csv"}
     return Response(
         stream_with_context(generate()),
         content_type="text/csv; charset=utf-8",
         headers=headers,
     )
+
+
+__all__ = ["export_month_csv"]

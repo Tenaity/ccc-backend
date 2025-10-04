@@ -256,6 +256,132 @@ Added department management and custom shift configuration to support multiple d
 - ✅ Sample data seeded successfully
 - ✅ All imports resolved (PageHeader, Textarea, GlassPanel)
 
+## Phase 5: Clean Architecture Migration (COMPLETED ✅)
+
+### Overview
+Migrated codebase from monolithic `app.py` to Clean Architecture pattern with clear separation of concerns.
+
+### Architecture Layers
+
+**1. Domain Layer** (`src/domain/`):
+- Pure business entities and DTOs
+- No dependencies on infrastructure or frameworks
+- Files: `holiday.py`
+
+**2. Application Layer** (`src/application/`):
+- Business logic services
+- Use cases and workflows
+- Services:
+  * `holiday_service.py` - Holiday management and import
+  * `metrics_service.py` - Workload metrics and department comparison
+  * `export_service.py` - CSV export for schedule data
+  * `shift_defaults_service.py` - Shift plan defaults management
+  * `month_config_service.py` - Month configuration management
+
+**3. Infrastructure Layer** (`src/infrastructure/`):
+- Persistence:
+  * `database.py` - SQLAlchemy engine and session management with caching
+  * `models.py` - ORM models and database migrations
+- Providers:
+  * `holiday_provider.py` - External holiday API integration (Nager.Date)
+
+**4. Presentation Layer** (`src/presentation/api/`):
+- HTTP endpoints using Flask blueprints
+- Request/response handling
+- Blueprints:
+  * `holidays.py` - Holiday CRUD and import endpoints
+  * `metrics.py` - Metrics dashboards (workload, cost, attendance)
+  * `reports.py` - CSV export endpoints
+  * `schedule.py` - Schedule generation and management
+  * `shift_defaults.py` - Shift defaults configuration
+  * `month_config.py` - Month configuration
+
+### Key Improvements
+
+**Database Session Management**:
+- Factory pattern with `get_session_factory()` for dependency injection
+- `reset_engine()` for test isolation (clears global caching)
+- Proper session lifecycle with context managers
+
+**Test Isolation**:
+- Centralized `conftest.py` fixture with database reset
+- Each test gets fresh SQLite database
+- `importlib.reload()` pattern to pick up new DB_URL
+- **All 43 tests passing (100%)**
+
+**Migration Path**:
+- Deleted legacy files: `api/` folder, `legacy_app.py`
+- All business logic moved to application services
+- Backwards-compatible database migrations in `models.init_db()`
+- Constants moved from `api/constants.py` to `application/metrics_service.py`
+
+### Migrated Components
+
+**Metrics & Reports**:
+- `api/metrics.py` → `src/application/metrics_service.py`
+  * `load_staff_workload()` - Per-staff hours and night hours
+  * `load_department_comparison()` - Department workload with overtime (respects dept settings)
+  * Uses department-specific `max_hours_per_month` from settings
+
+- `api/export_month_csv.py` → `src/application/export_service.py`
+  * `export_month_csv()` - Monthly schedule CSV with streaming
+  * Columns: Ngày, Staff, Role, Rank, Shift, Position, Công
+
+**Endpoints**:
+- `GET /api/metrics/staff-workload` - Staff workload with totals
+- `GET /api/metrics/department-compare` - Department comparison
+- `GET /api/metrics/attendance` - Attendance stub (future impl)
+- `GET /api/metrics/cost` - Labor cost (uses LABOR_COST_PER_HOUR env var)
+- `GET /api/reports/staff-workload.csv` - Staff workload CSV export
+- `GET /api/reports/department-compare.csv` - Department comparison CSV
+- `GET /api/reports/schedule-month.csv` - Monthly schedule CSV
+
+### Database Migration Logic
+
+**Holiday Table Evolution** (`models.init_db()`):
+1. Rename `holidays` → `holiday` (if legacy table exists)
+2. Rename column `day` → `date`
+3. Add columns: `kind`, `official`, `source`
+4. Create unique index on `date`
+5. Idempotent - safe to run multiple times
+
+**Position Column** (FixedAssignment):
+1. Auto-add `position` column if missing
+2. Enables PGD/TD tracking in fixed assignments
+
+### Testing Strategy
+
+**Test Fixture Pattern** (`tests/conftest.py`):
+```python
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    monkeypatch.setenv("DB_URL", f"sqlite:///{tmp_path}/test.db")
+    db_module.reset_engine()
+    importlib.reload(models)
+    models.init_db()
+    importlib.reload(app_module)
+    return SimpleNamespace(
+        client=app_module.app.test_client(),
+        models=models,
+        module=app_module,
+    )
+```
+
+**Key Lessons**:
+- Always call `reset_engine()` before reloading models in tests
+- Module-level engine assignment needs reload to pick up new DB_URL
+- Use `db_module.get_engine()` directly when module globals might be stale
+- Test migration logic with both individual and full suite runs
+
+### Status
+- ✅ Clean Architecture structure implemented
+- ✅ All business logic migrated to services
+- ✅ Database session management refactored
+- ✅ Test isolation fixed with proper engine reset
+- ✅ Legacy files deleted (api/, legacy_app.py)
+- ✅ All 43 tests passing
+- ✅ Database migrations working correctly
+
 ## Commands
 - `make venv` – create virtualenv and install deps
 - `make migrate` – generate migrations
