@@ -1,20 +1,34 @@
-"""Metrics helpers for dashboard endpoints."""
+"""Metrics business logic for dashboard and reporting."""
+
 from __future__ import annotations
 
 import calendar
 from dataclasses import dataclass
 from datetime import date
-from typing import Iterable, Sequence
+from typing import Sequence
 
 from sqlalchemy import case, func
 
 import models
 
-from .constants import DEFAULT_MAX_HOURS_PER_STAFF, NIGHT_SHIFT_CODES, SHIFT_HOURS
+# Constants (from legacy api/constants.py)
+BASE_HOURS_PER_CREDIT = 8.0
+SHIFT_CREDIT = {
+    "CA1": 1,
+    "CA2": 1,
+    "K": 1.25,
+    "Đ": 1.5,
+    "HC": 1,
+    "P": 0,
+}
+SHIFT_HOURS = {code: credit * BASE_HOURS_PER_CREDIT for code, credit in SHIFT_CREDIT.items()}
+NIGHT_SHIFT_CODES = {"Đ"}
+DEFAULT_MAX_HOURS_PER_STAFF = 208.0
 
 
 @dataclass(frozen=True)
 class StaffWorkloadRow:
+    """Per-staff workload metrics."""
     staff_id: int
     name: str
     hours: float
@@ -23,6 +37,7 @@ class StaffWorkloadRow:
 
 @dataclass(frozen=True)
 class DepartmentWorkloadRow:
+    """Per-department workload metrics."""
     department_id: int
     dept: str
     staff_count: int
@@ -31,6 +46,7 @@ class DepartmentWorkloadRow:
 
 
 def _month_range(year: int, month: int) -> tuple[date, date]:
+    """Get first and last day of month."""
     last_day = calendar.monthrange(year, month)[1]
     start = date(year, month, 1)
     end = date(year, month, last_day)
@@ -38,6 +54,7 @@ def _month_range(year: int, month: int) -> tuple[date, date]:
 
 
 def _hours_case():
+    """SQLAlchemy CASE expression for shift hours."""
     whens: Sequence[tuple[object, float]] = [
         (models.Assignment.shift_code == code, hours)
         for code, hours in SHIFT_HOURS.items()
@@ -46,6 +63,7 @@ def _hours_case():
 
 
 def _night_hours_case():
+    """SQLAlchemy CASE expression for night shift hours."""
     whens: Sequence[tuple[object, float]] = [
         (models.Assignment.shift_code == code, SHIFT_HOURS[code])
         for code in NIGHT_SHIFT_CODES
@@ -55,13 +73,12 @@ def _night_hours_case():
 
 def load_staff_workload(year: int, month: int) -> tuple[list[StaffWorkloadRow], dict[str, float]]:
     """Return per-staff workload with totals for a month."""
-
     start, end = _month_range(year, month)
     hour_case = _hours_case()
     night_case = _night_hours_case()
 
     with models.SessionLocal() as session:
-        rows: Iterable[tuple[int, str, float, float]] = (
+        rows = (
             session.query(
                 models.Assignment.staff_id,
                 models.Staff.full_name,
@@ -93,7 +110,6 @@ def load_staff_workload(year: int, month: int) -> tuple[list[StaffWorkloadRow], 
 
 def load_department_comparison(year: int, month: int) -> list[DepartmentWorkloadRow]:
     """Return workload aggregated per department for a month."""
-
     start, end = _month_range(year, month)
     hour_case = _hours_case()
 
@@ -145,4 +161,13 @@ def load_department_comparison(year: int, month: int) -> list[DepartmentWorkload
                 overtime_hours=overtime_hours,
             )
         )
+
     return result
+
+
+__all__ = [
+    "StaffWorkloadRow",
+    "DepartmentWorkloadRow",
+    "load_staff_workload",
+    "load_department_comparison",
+]

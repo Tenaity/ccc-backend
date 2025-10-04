@@ -11,15 +11,16 @@ def client(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("LABOR_COST_PER_HOUR", "50")
-    import models
-    import api.metrics as metrics_module
 
+    # Reset database engine cache to pick up new DB_URL
+    from src.infrastructure.persistence import database as db_module
+    db_module.reset_engine()
+
+    import models
     importlib.reload(models)
     models.init_db()
-    importlib.reload(metrics_module)
 
     import app as app_module
-
     importlib.reload(app_module)
     return app_module.app.test_client(), models
 

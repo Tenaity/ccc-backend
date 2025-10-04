@@ -1,0 +1,90 @@
+"""Database bootstrap helpers."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Iterator
+
+from contextlib import contextmanager
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
+
+from src.settings.config import get_database_settings
+
+Base = declarative_base()
+_engine = None
+_SessionLocal = None
+_active_url = None
+
+
+def _normalise_url(raw: str) -> str:
+    if raw.startswith("sqlite:///"):
+        db_file = raw.replace("sqlite:///", "", 1)
+        if db_file and db_file != ":memory:":
+            path = Path(db_file).expanduser().resolve()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            return f"sqlite:///{path}"
+    return raw
+
+
+def get_engine():
+    global _engine, _SessionLocal, _active_url
+    settings = get_database_settings()
+    url = _normalise_url(settings.url)
+
+    if _engine is None or url != _active_url:
+        if _engine is not None:
+            try:
+                _engine.dispose()
+            except Exception:  # pragma: no cover - defensive
+                pass
+        _engine = create_engine(url, echo=False, future=True)
+        _SessionLocal = None
+        _active_url = url
+    return _engine
+
+
+def get_session_factory():
+    global _SessionLocal
+    engine = get_engine()
+    if _SessionLocal is None:
+        _SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+    return _SessionLocal
+
+
+@contextmanager
+def session_scope() -> Iterator[Session]:
+    """Provide a transactional scope around a series of operations."""
+
+    session = get_session_factory()()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+def init_db() -> None:
+    """Create all tables if they don't exist."""
+
+    Base.metadata.create_all(get_engine())
+
+
+def reset_engine() -> None:
+    """Reset cached engine and session factory (useful for test reinitialisation)."""
+
+    global _engine, _SessionLocal, _active_url
+    if _engine is not None:
+        try:
+            _engine.dispose()
+        except Exception:  # pragma: no cover - defensive
+            pass
+    _engine = None
+    _SessionLocal = None
+    _active_url = None
+

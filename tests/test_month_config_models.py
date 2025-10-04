@@ -10,8 +10,12 @@ from sqlalchemy.exc import IntegrityError
 def models(tmp_path, monkeypatch):
     db_path = tmp_path / "config.db"
     monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
-    import models as models_module
 
+    # Reset database engine cache to pick up new DB_URL
+    from src.infrastructure.persistence import database as db_module
+    db_module.reset_engine()
+
+    import models as models_module
     importlib.reload(models_module)
     models_module.init_db()
     return models_module
@@ -75,12 +79,19 @@ def test_init_db_migrates_legacy_holidays(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
 
-    import models as models_module
+    # Reset database engine cache to pick up new DB_URL
+    from src.infrastructure.persistence import database as db_module
+    db_module.reset_engine()
 
-    importlib.reload(models_module)
-    models_module.init_db()
+    import models
+    importlib.reload(models)
+    models.init_db()
 
-    with models_module.engine.connect() as raw_conn:
+    models_module = models
+
+    # Use get_engine() to ensure we get the correct engine for this test
+    test_engine = db_module.get_engine()
+    with test_engine.connect() as raw_conn:
         tables = {
             row[0]
             for row in raw_conn.exec_driver_sql(
@@ -109,7 +120,9 @@ def test_init_db_migrates_legacy_holidays(tmp_path, monkeypatch):
                 break
         assert date_index_verified, "holiday(date) should be unique"
 
-    with models_module.SessionLocal() as session:
+    # Use get_session_factory() to ensure we get the correct session for this test
+    test_session_factory = db_module.get_session_factory()
+    with test_session_factory() as session:
         rows = session.query(models_module.Holiday).all()
         assert len(rows) == 1
         assert rows[0].day == date(2024, 1, 1)

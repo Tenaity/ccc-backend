@@ -11,6 +11,11 @@ import pytest
 def client(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
+
+    # Reset database engine cache to pick up new DB_URL
+    from src.infrastructure.persistence import database as db_module
+    db_module.reset_engine()
+
     import app as app_module
     import models
 
