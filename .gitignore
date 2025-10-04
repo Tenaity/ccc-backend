@@ -7,3 +7,5 @@ build/
 instance/*.sqlite
 instance/*.db
 .env
+.venv311
+.venv_backup

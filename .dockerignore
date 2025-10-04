@@ -1,0 +1,14 @@
+.venv
+.venv311
+.venv_backup
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+instance/*.sqlite
+instance/*.db
+.env
+.env.*
+.git
+.gitignore
+
