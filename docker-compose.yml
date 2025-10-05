@@ -1,0 +1,26 @@
+services:
+  backend:
+    build: .
+    command: ["python", "app.py"]
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: local
+      HOST: 0.0.0.0
+      PORT: 8000
+      CORS_ORIGINS: http://localhost:5173
+      API_KEY: 123456
+      DATABASE_URL: postgresql+psycopg://admin:b@localhost:5432/ccc
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ccc
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: b
+      X-API-KEY: 123456
+      WEBHOOK_UPLOAD_URL: https://iconic-host.lapage.vn/webhook/upload-file
+      WEBHOOK_CHUNKING_URL: https://iconic-host.lapage.vn/webhook/chunking
+    volumes:
+      - .:/app
+    depends_on:
+      - postgres
+    restart: unless-stopped
