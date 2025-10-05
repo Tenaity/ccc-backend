@@ -7,7 +7,9 @@ import pathlib
 
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
+from dotenv import load_dotenv
 
+from middleware.api_key import register_api_key_middleware
 from models import init_db
 
 from src.presentation.api.admin import admin_bp
@@ -34,6 +36,8 @@ else:
     frontend_path = DEFAULT_FRONTEND_DIST
 frontend_static = str(frontend_path.resolve()) if frontend_path.exists() else None
 
+load_dotenv()
+
 
 def create_app() -> Flask:
     app = Flask(
@@ -44,6 +48,8 @@ def create_app() -> Flask:
     cors_raw = os.getenv("CORS_ORIGINS", "*")
     cors_origins = [item.strip() for item in cors_raw.split(",") if item.strip()]
     CORS(app, origins=cors_origins or ["*"], supports_credentials=True)
+
+    register_api_key_middleware(app, api_key=os.getenv("API_KEY"))
 
     # ensure database schema exists
     init_db()

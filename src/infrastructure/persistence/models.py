@@ -235,7 +235,11 @@ class MonthConfig(Base):
     month: Mapped[int] = mapped_column(Integer, nullable=False)
     working_days_override: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     weekend_policy: Mapped[WeekendPolicy] = mapped_column(
-        SAEnum(WeekendPolicy, name="weekend_policy"),
+        SAEnum(
+            WeekendPolicy,
+            name="weekend_policy",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
         nullable=False,
         default=WeekendPolicy.SAT_OFF,
         server_default=WeekendPolicy.SAT_OFF.value,
@@ -267,6 +271,35 @@ class ShiftPlanDefaults(Base):
     pgd_shifts: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
+def _ensure_weekend_policy_enum(engine) -> None:
+    """Ensure Postgres enum contains all weekend policy options."""
+
+    if engine.dialect.name != "postgresql":
+        return
+
+    try:
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+            exists = conn.exec_driver_sql(
+                "SELECT 1 FROM pg_type WHERE typname = 'weekend_policy'"
+            ).scalar()
+            if not exists:
+                return
+
+            rows = conn.exec_driver_sql(
+                "SELECT enumlabel FROM pg_enum e "
+                "JOIN pg_type t ON t.oid = e.enumtypid "
+                "WHERE t.typname = 'weekend_policy'"
+            )
+            existing = {row[0] for row in rows}
+            for value in (policy.value for policy in WeekendPolicy):
+                if value not in existing:
+                    conn.exec_driver_sql(
+                        f"ALTER TYPE weekend_policy ADD VALUE IF NOT EXISTS '{value}'"
+                    )
+    except Exception:
+        return
+
+
 def init_db():
     """Create tables and run lightweight migrations.
 
@@ -283,6 +316,8 @@ def init_db():
         existing_tables = set(insp.get_table_names())
     except Exception:
         existing_tables = set()
+
+    _ensure_weekend_policy_enum(engine)
 
     if "holidays" in existing_tables and "holiday" not in existing_tables:
         with engine.begin() as conn:
