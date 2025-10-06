@@ -62,6 +62,16 @@ def get_engine():
                 _engine.dispose()
             except Exception:  # pragma: no cover - defensive
                 pass
+        engine_kwargs = {
+            "echo": False,
+            "future": True,
+        }
+        normalized = url.split("?")[0]
+        if normalized in {"sqlite://", "sqlite:///:memory:"} or normalized.endswith(":memory:"):
+            engine_kwargs.update({
+                "connect_args": {"check_same_thread": False},
+                "poolclass": StaticPool,
+            })
         _engine = create_engine(url, **engine_kwargs)
         _SessionLocal = None
         _active_url = url
