@@ -25,6 +25,7 @@ from src.presentation.api.reports import reports_bp
 from src.presentation.api.schedule import schedule_bp
 from src.presentation.api.shift_config import shift_config_bp
 from src.presentation.api.shift_defaults import shift_defaults_bp
+from src.presentation.api.chatbot_data import chatbot_data_bp
 from src.presentation.api.staff import staff_bp
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
@@ -68,6 +69,7 @@ def create_app() -> Flask:
     app.register_blueprint(metrics_bp)
     app.register_blueprint(reports_bp)
     app.register_blueprint(export_bp)
+    app.register_blueprint(chatbot_data_bp)
     app.register_blueprint(admin_bp)
 
     # keep ORM helpers in sync with the active engine
