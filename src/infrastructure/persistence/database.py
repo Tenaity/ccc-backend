@@ -9,6 +9,7 @@ from typing import Iterator
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from src.settings.config import get_database_settings
@@ -40,7 +41,17 @@ def get_engine():
                 _engine.dispose()
             except Exception:  # pragma: no cover - defensive
                 pass
-        _engine = create_engine(url, echo=False, future=True)
+        engine_kwargs = {
+            "echo": False,
+            "future": True,
+        }
+        normalized = url.split("?")[0]
+        if normalized in {"sqlite://", "sqlite:///:memory:"} or normalized.endswith(":memory:"):
+            engine_kwargs.update({
+                "connect_args": {"check_same_thread": False},
+                "poolclass": StaticPool,
+            })
+        _engine = create_engine(url, **engine_kwargs)
         _SessionLocal = None
         _active_url = url
     return _engine
