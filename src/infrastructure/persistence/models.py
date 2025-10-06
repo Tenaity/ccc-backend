@@ -309,7 +309,15 @@ def init_db():
 
     global engine, SessionLocal
     engine = _database.get_engine()
-    SessionLocal = _database.get_session_factory()
+
+    if hasattr(SessionLocal, "configure"):
+        # Rebind existing session factory so importers that captured the
+        # original SessionLocal (via ``from models import SessionLocal``) keep
+        # pointing at the up-to-date engine.
+        SessionLocal.configure(bind=engine, expire_on_commit=False)
+        _database._SessionLocal = SessionLocal
+    else:  # pragma: no cover - defensive fallback
+        SessionLocal = _database.get_session_factory()
 
     insp = inspect(engine)
     try:
@@ -411,4 +419,3 @@ __all__ = [
     'ShiftPlanDefaults',
     'init_db',
 ]
-

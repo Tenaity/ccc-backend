@@ -10,6 +10,12 @@ from models import Base, FixedAssignment, Holiday, OffDay, SessionLocal, Staff, 
 
 
 def seed_small(session):
+    # Ensure idempotent seeding when reusing the in-memory database across tests.
+    session.query(FixedAssignment).delete()
+    session.query(OffDay).delete()
+    session.query(Holiday).delete()
+    session.query(Staff).delete()
+
     staff = [
         Staff(id=1, full_name="TC1", role="TC", base_quota=2),
         Staff(id=2, full_name="TC2", role="TC", base_quota=2),
