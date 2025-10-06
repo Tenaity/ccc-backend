@@ -9,6 +9,7 @@ from typing import Iterator
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from src.settings.config import get_database_settings
@@ -35,12 +36,33 @@ def get_engine():
     url = _normalise_url(settings.url)
 
     if _engine is None or url != _active_url:
+        engine_kwargs = {"echo": False, "future": True}
+
+        if url.startswith("sqlite"):
+            # Allow connections to be shared across threads which helps with
+            # background tasks and test fixtures.
+            engine_kwargs["connect_args"] = {"check_same_thread": False}
+
+            normalized = url.split("?", 1)[0]
+            is_memory = (
+                normalized in {"sqlite://", "sqlite:///:memory:"}
+                or normalized.endswith(":memory:")
+                or ":memory:" in normalized
+            )
+
+            if is_memory:
+                # Ensure all sessions share the same in-memory database. Without
+                # a static pool each new connection would see a fresh schema,
+                # causing "no such table" errors in tests that rely on
+                # init_db() to create the schema once per fixture.
+                engine_kwargs["poolclass"] = StaticPool
+
         if _engine is not None:
             try:
                 _engine.dispose()
             except Exception:  # pragma: no cover - defensive
                 pass
-        _engine = create_engine(url, echo=False, future=True)
+        _engine = create_engine(url, **engine_kwargs)
         _SessionLocal = None
         _active_url = url
     return _engine
@@ -87,4 +109,3 @@ def reset_engine() -> None:
     _engine = None
     _SessionLocal = None
     _active_url = None
-
