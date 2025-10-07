@@ -7,9 +7,15 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Sequence
 
+import logging
+
 from sqlalchemy import case, func
 
+from src.utils.logging import log_call
+
 import models
+
+logger = logging.getLogger(__name__)
 
 # Constants (from legacy api/constants.py)
 BASE_HOURS_PER_CREDIT = 8.0
@@ -71,6 +77,7 @@ def _night_hours_case():
     return case(*whens, else_=0.0)
 
 
+@log_call(logger)
 def load_staff_workload(year: int, month: int) -> tuple[list[StaffWorkloadRow], dict[str, float]]:
     """Return per-staff workload with totals for a month."""
     start, end = _month_range(year, month)
@@ -108,6 +115,7 @@ def load_staff_workload(year: int, month: int) -> tuple[list[StaffWorkloadRow], 
     return data, totals
 
 
+@log_call(logger)
 def load_department_comparison(year: int, month: int) -> list[DepartmentWorkloadRow]:
     """Return workload aggregated per department for a month."""
     start, end = _month_range(year, month)
@@ -171,3 +179,4 @@ __all__ = [
     "load_staff_workload",
     "load_department_comparison",
 ]
+

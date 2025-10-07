@@ -6,6 +6,7 @@ from typing import List, Optional
 
 from sqlalchemy import func, select
 
+from src.utils.logging import instrument_service
 from src.domain.department import DepartmentDTO
 from src.domain.exceptions import ConflictError, NotFoundError, ValidationError
 from src.infrastructure.persistence import database as persistence_db
@@ -16,6 +17,7 @@ from src.infrastructure.persistence.models import (
 )
 
 
+@instrument_service
 class DepartmentService:
     def __init__(self, session_factory=None):
         self._session_factory = session_factory

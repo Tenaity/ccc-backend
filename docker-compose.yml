@@ -1,26 +1,27 @@
 services:
   backend:
-    build: .
-    command: ["python", "app.py"]
-    ports:
-      - "8000:8000"
+    container_name: ccc-be
+    image: bibi1211/ccc-be:v1.0
     environment:
       APP_ENV: local
       HOST: 0.0.0.0
       PORT: 8000
-      CORS_ORIGINS: http://localhost:5173
-      API_KEY: 123456
-      DATABASE_URL: postgresql+psycopg://admin:b@localhost:5432/ccc
-      POSTGRES_HOST: localhost
+      CORS_ORIGINS:
+      X-API-KEY: 123456
+      DATABASE_URL: postgresql+psycopg://admin:b@postgres-container:5432/ccc
+      POSTGRES_HOST: postgres-container
       POSTGRES_PORT: 5432
       POSTGRES_DB: ccc
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: b
-      X-API-KEY: 123456
-      WEBHOOK_UPLOAD_URL: https://iconic-host.lapage.vn/webhook/upload-file
-      WEBHOOK_CHUNKING_URL: https://iconic-host.lapage.vn/webhook/chunking
-    volumes:
-      - .:/app
-    depends_on:
-      - postgres
+    ports:
+      - "8000:8000"
+    networks:
+      #- env_postgres_shared
+      - postgres_shared-network
     restart: unless-stopped
+
+networks:
+  #nv_postgres_shared:
+  postgres_shared-network:
+    external: true

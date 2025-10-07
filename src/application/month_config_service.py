@@ -8,6 +8,7 @@ from typing import Optional
 
 from sqlalchemy import select
 
+from src.utils.logging import instrument_service
 from src.application.utils import parse_year_month
 from src.domain.exceptions import ValidationError
 from src.infrastructure.persistence import database as persistence_db
@@ -29,6 +30,7 @@ class MonthConfigPayload:
     config: dict
 
 
+@instrument_service
 class MonthConfigService:
     def __init__(self, session_factory=None):
         self._session_factory = session_factory

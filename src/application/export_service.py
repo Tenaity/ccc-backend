@@ -9,9 +9,15 @@ import re
 from datetime import date
 from typing import Optional
 
+import logging
+
 from flask import Response, stream_with_context
 
+from src.utils.logging import log_call
+
 import models
+
+logger = logging.getLogger(__name__)
 
 # Shift credit mapping
 SHIFT_CREDIT = {
@@ -34,6 +40,7 @@ def _extract_rank(notes: Optional[str]) -> str:
     return m.group(1) if m else ""
 
 
+@log_call(logger)
 def export_month_csv(year: int, month: int) -> Response:
     """Stream assignment data of a month as CSV.
 

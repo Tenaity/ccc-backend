@@ -1,3 +1,4 @@
+
 """Flask application factory."""
 
 from __future__ import annotations
@@ -20,13 +21,19 @@ from src.presentation.api.holiday import holiday_bp
 from src.presentation.api.lookup import lookup_bp
 from src.presentation.api.metrics import metrics_bp
 from src.presentation.api.month_config import month_config_bp
-from src.presentation.api.offday import offday_bp, create_off_day, delete_off_day, list_off_days
+from src.presentation.api.offday import (
+    create_off_day,
+    delete_off_day,
+    list_off_days,
+    offday_bp,
+)
 from src.presentation.api.reports import reports_bp
 from src.presentation.api.schedule import schedule_bp
 from src.presentation.api.shift_config import shift_config_bp
 from src.presentation.api.shift_defaults import shift_defaults_bp
 from src.presentation.api.chatbot_data import chatbot_data_bp
 from src.presentation.api.staff import staff_bp
+from src.utils.logging import configure_logging, instrument_flask_routes, register_http_logging
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_FRONTEND_DIST = BASE_DIR.parent / "frontend" / "dist"
@@ -38,6 +45,7 @@ else:
 frontend_static = str(frontend_path.resolve()) if frontend_path.exists() else None
 
 load_dotenv()
+configure_logging()
 
 
 def create_app() -> Flask:
@@ -50,7 +58,8 @@ def create_app() -> Flask:
     cors_origins = [item.strip() for item in cors_raw.split(",") if item.strip()]
     CORS(app, origins=cors_origins or ["*"], supports_credentials=True)
 
-    register_api_key_middleware(app, api_key=os.getenv("API_KEY"))
+    register_api_key_middleware(app, api_key=os.getenv("X-API-KEY"))
+    register_http_logging(app)
 
     # ensure database schema exists
     init_db()
@@ -71,6 +80,8 @@ def create_app() -> Flask:
     app.register_blueprint(export_bp)
     app.register_blueprint(chatbot_data_bp)
     app.register_blueprint(admin_bp)
+
+    instrument_flask_routes(app)
 
     # keep ORM helpers in sync with the active engine
     import models as _models
