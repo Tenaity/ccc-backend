@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import Optional
 
+import logging
+
 from flask import Flask, jsonify, request
+
+
+logger = logging.getLogger(__name__)
 
 
 def register_api_key_middleware(app: Flask, *, api_key: Optional[str]) -> None:
@@ -20,4 +25,5 @@ def register_api_key_middleware(app: Flask, *, api_key: Optional[str]) -> None:
 
         header_key = request.headers.get("x-api-key")
         if header_key != api_key:
+            logger.warning("invalid API key", extra={"path": request.path, "remote_addr": request.remote_addr})
             return jsonify({"isSuccess": False, "error": "invalid_api_key"}), 401

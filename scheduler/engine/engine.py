@@ -5,6 +5,8 @@ from collections import defaultdict
 from datetime import date, timedelta  # ⬅️ thêm date
 from typing import Dict, List, Optional
 
+import logging
+
 from rules import get_profile  # ⬅️ để lấy expected nếu cần đối chiếu nhanh
 from scheduler.utils import day_kind  # ⬅️ dùng khi đối chiếu expected từng ngày
 
@@ -15,8 +17,12 @@ from .core import TOLERANCE, build_context, close_context
 from .phase_day import run_phase_day
 from .phase_night import run_phase_night
 from .utils_rank import FairnessWindow
+from .logging import engine_log, balancer_log
+from src.utils.logging import log_call
 
+logger = logging.getLogger(__name__)
 
+@log_call(logger)
 def schedule_month(
     year: int,
     month: int,
@@ -28,8 +34,8 @@ def schedule_month(
     effective_working_days: float | None = None,
     shift_plan_defaults: dict[str, int] | None = None,
 ):
-    print(
-        f"[ENGINE] start y={year} m={month} shuffle={shuffle} seed={seed} save={save} fill_hc={fill_hc}"
+    engine_log(
+        f"start y={year} m={month} shuffle={shuffle} seed={seed} save={save} fill_hc={fill_hc}"
     )
     reset_trackers()
 
@@ -51,7 +57,7 @@ def schedule_month(
 
     try:
         # (0) Scatter HC mặc định
-        print("[ENGINE] phase0: scatter default HC (weekdays, non-holiday)")
+        engine_log("phase0: scatter default HC (weekdays, non-holiday)")
         placed_p0 = 0
         d = first
         while d <= last:
@@ -67,28 +73,26 @@ def schedule_month(
             d += timedelta(days=1)
         if ctx.save:
             ctx.session.commit()
-        print(f"[ENGINE] phase0 done: placed={placed_p0}")
+        engine_log(f"phase0 done: placed={placed_p0}")
 
         # (1) NIGHT
-        print("[ENGINE] phase1: NIGHT")
+        engine_log("phase1: NIGHT")
         night_miss: List[date] = run_phase_night(ctx, first, last, fair) or []  # ⬅️ rõ type
         if night_miss:
-            print(
-                "[ENGINE] NIGHT_MISS (no night leader):",
-                [x.isoformat() for x in night_miss[:10]],
-                "…",
+            engine_log(
+                f"NIGHT_MISS (no night leader): {[x.isoformat() for x in night_miss[:10]]} …"
             )
 
         # (2) DAY
-        print("[ENGINE] phase2: DAY")
+        engine_log("phase2: DAY")
         before_day = len(ctx._planned)
         run_phase_day(ctx, first, last, fair)
         after_day = len(ctx._planned)
-        print(f"[ENGINE] phase2 done: placed={after_day - before_day}, total={after_day}")
+        engine_log(f"phase2 done: placed={after_day - before_day}, total={after_day}")
 
         # (3) BALANCER (optional)
         if fill_hc:
-            print("[ENGINE] phase3: BALANCER HC")
+            engine_log("phase3: BALANCER HC")
             normalized = [(p.day, p.staff_id, p.shift_code, p.position) for p in ctx._planned]
             everyone = ctx.TC + ctx.GDV + ctx.HC
 
@@ -113,7 +117,7 @@ def schedule_month(
                     if df > TOLERANCE + 1e-9:
                         leftovers.append((sid, round(df, 2)))
                 if leftovers:
-                    print("[BALANCER] Không thể bù hết do thiếu ngày hợp lệ:", leftovers[:10], "…")
+                    balancer_log(f"Không thể bù hết do thiếu ngày hợp lệ: {leftovers[:10]} …")
 
             applied = 0
             for d0, sid0, code0, pos0 in proposals or []:
@@ -129,10 +133,10 @@ def schedule_month(
                 applied += 1
             if ctx.save:
                 ctx.session.commit()
-            print(f"[ENGINE] phase3 done: applied={applied}, total={len(ctx._planned)}")
+            engine_log(f"phase3 done: applied={applied}, total={len(ctx._planned)}")
 
         # (4) Validate 1 trưởng ca NGÀY
-        print("[ENGINE] phase4: VALIDATE day leaders")
+        engine_log("phase4: VALIDATE day leaders")
         bad = validate_one_day_leader(ctx._planned, first, last)
         if bad:
             body = {
@@ -141,7 +145,7 @@ def schedule_month(
                 "details": [{"day": d.isoformat(), "leaders": c} for d, c in bad],
                 "planned": exp_planned(ctx._planned),
             }
-            print("[ENGINE] done: error -> 400")
+            engine_log("done: error -> 400")
             return body, 400
 
         # (optional) đối chiếu nhanh expected vs actual để debug (in console)
@@ -158,7 +162,7 @@ def schedule_month(
             pass
 
         body = {"ok": True, "planned": exp_planned(ctx._planned)}
-        print(f"[ENGINE] done: ok, planned={len(ctx._planned)} rows")
+        engine_log(f"done: ok, planned={len(ctx._planned)} rows")
         return body
 
     finally:

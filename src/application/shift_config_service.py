@@ -6,6 +6,7 @@ from typing import List, Optional
 
 from sqlalchemy import select
 
+from src.utils.logging import instrument_service
 from src.domain.exceptions import NotFoundError, ValidationError
 from src.infrastructure.persistence import database as persistence_db
 from src.infrastructure.persistence.models import (
@@ -14,6 +15,7 @@ from src.infrastructure.persistence.models import (
 )
 
 
+@instrument_service
 class ShiftConfigService:
     def __init__(self, session_factory=None):
         self._session_factory = session_factory

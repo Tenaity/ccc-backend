@@ -9,6 +9,7 @@ from typing import Iterable, List, Optional, Tuple
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from src.utils.logging import instrument_service
 from src.domain.exceptions import ConflictError, NotFoundError, ValidationError
 from src.domain.holiday import HolidayDTO
 from src.infrastructure.persistence import database as persistence_db
@@ -16,6 +17,7 @@ from src.infrastructure.persistence.models import Holiday
 from src.infrastructure.providers.holiday_provider import HolidayProviderError
 
 
+@instrument_service
 class HolidayService:
     """Encapsulates holiday use-cases."""
 

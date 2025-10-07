@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
+from src.utils.logging import instrument_service
 from src.application.utils import parse_year_month
 from src.domain.exceptions import ValidationError
 from src.infrastructure.persistence import database as persistence_db
 from src.infrastructure.persistence.models import ShiftPlanDefaults
 
 
+@instrument_service
 class ShiftDefaultsService:
     def __init__(self, session_factory=None):
         self._session_factory = session_factory

@@ -6,11 +6,13 @@ import calendar
 from datetime import date
 from typing import List
 
+from src.utils.logging import instrument_service
 from src.domain.exceptions import NotFoundError, ValidationError
 from src.infrastructure.persistence import database as persistence_db
 from src.infrastructure.persistence.models import OffDay, Staff
 
 
+@instrument_service
 class OffDayService:
     def __init__(self, session_factory=None):
         self._session_factory = session_factory

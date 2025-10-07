@@ -6,6 +6,7 @@ from typing import Dict
 
 from sqlalchemy import func, select
 
+from src.utils.logging import instrument_service
 from src.domain.chatbot_data import ChatbotDataDTO, ChatbotDataPage
 from src.domain.exceptions import NotFoundError, ValidationError
 from src.infrastructure.persistence import database as persistence_db
@@ -23,6 +24,7 @@ def _normalise_float(value):
         raise ValidationError("price must be numeric") from exc
 
 
+@instrument_service
 class ChatbotDataService:
     """Encapsulate CRUD operations with pagination."""
 

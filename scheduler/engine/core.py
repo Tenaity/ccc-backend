@@ -6,6 +6,8 @@ import random
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import date
+
+import logging
 from typing import Any, DefaultDict, Deque, Dict, List, Optional, Set, Tuple, Union
 
 from sqlalchemy.orm import Session
@@ -17,6 +19,9 @@ from scheduler.placements import Planned, after_place, place
 from scheduler.repo import load_fixed, load_holidays, load_locked, load_staff
 from scheduler.utils import month_last_day, ymd
 from scheduler.preferences_adapter import PreferencesAdapter
+from src.utils.logging import log_call
+
+logger = logging.getLogger(__name__)
 
 ShiftCode = str
 Position = Optional[str]
@@ -88,6 +93,7 @@ class Context:
         after_place(staff_id, day, code)
 
 
+@log_call(logger)
 def build_context(
     *,
     year: int,
@@ -158,6 +164,7 @@ def build_context(
     return ctx, first, last
 
 
+@log_call(logger)
 def close_context(ctx: Context):
     try:
         ctx.session.close()

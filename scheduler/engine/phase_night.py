@@ -5,17 +5,22 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Dict, List, Set
 
+import logging
+
 from scheduler.randomize import CFG as RAND_CFG
 from scheduler.utils import day_kind
 
 from .core import Context
 from .logging import night_log
+from src.utils.logging import log_call
 from .utils_rank import (
     ChoiceCtx,
     FairnessWindow,
     budget_for_day,
     fill_ranked_slots,
 )  # dùng bản trong engine/
+
+logger = logging.getLogger(__name__)
 
 # Cho phép “cứu cháy” leader đêm: bỏ rào trần công nếu cần thiết
 ALLOW_OVERCAP_NIGHT_LEADER = True
@@ -36,6 +41,7 @@ def _get_total(night_detail: dict, place_key: str) -> int:
         return int(box.get("Đ", 0) or 0)
 
 
+@log_call(logger)
 def run_phase_night(ctx: Context, first: date, last: date, fair: FairnessWindow) -> List[date]:
     """
     Phase NIGHT (cân bằng rank cho GDV):

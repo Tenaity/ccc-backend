@@ -4,14 +4,19 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Dict, Set
 
+import logging
+
 from rules.types import ShiftCode
 from scheduler.utils import day_kind
 
 from .core import Context
 from .logging import day_log
+from src.utils.logging import log_call
 from .utils_rank import ChoiceCtx, FairnessWindow, budget_for_day, fill_ranked_slots
 
+logger = logging.getLogger(__name__)
 
+@log_call(logger)
 def run_phase_day(ctx: Context, first: date, last: date, fair: FairnessWindow):
     d = first
     while d <= last:
