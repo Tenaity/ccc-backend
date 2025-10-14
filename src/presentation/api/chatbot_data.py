@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from http import HTTPStatus
 
 from flask import Blueprint, jsonify, request
@@ -10,15 +11,17 @@ from src.application.chatbot_data_service import ChatbotDataService
 from src.domain.exceptions import NotFoundError, ValidationError
 
 
+logger = logging.getLogger(__name__)
+
 chatbot_data_bp = Blueprint("chatbot_data", __name__, url_prefix="/api/chatbot-data")
 service = ChatbotDataService()
 
 _FIELD_SERIALIZATION = {
     "id": "id",
-    "raw_text": "raw_text",
-    "major_section": "major_section",
-    "full_section_id": "full_section_id",
-    "source_table": "source_table",
+    "raw_text": "rawText",
+    "major_section": "majorSection",
+    "full_section_id": "fullSectionId",
+    "source_table": "sourceTable",
     "another_price": "anotherPrice",
     "title": "title",
     "site": "site",
@@ -38,8 +41,10 @@ _FIELD_SERIALIZATION = {
     "calculation_formula": "calculation_formula",
     "context": "context",
     "scope_and_conditions": "scope_and_conditions",
+    "point_note": "point_note",
     "keywords": "keywords",
-    "embedding_text": "embedding_text",
+    "embedding_text": "embeddingText",
+    "year": "year",
     "status": "status",
     "process": "process",
     "intent": "intent",
@@ -68,6 +73,13 @@ def list_records():
     try:
         page, page_size = _parse_pagination(request.args)
         page_data = service.list_records(page=page, page_size=page_size)
+        logger.info(
+            "Fetched chatbot data list: page=%s page_size=%s returned=%s total=%s",
+            page,
+            page_size,
+            len(page_data.items),
+            page_data.total,
+        )
         return (
             jsonify(
                 {
@@ -80,6 +92,7 @@ def list_records():
             HTTPStatus.OK,
         )
     except ValidationError as exc:
+        logger.warning("Invalid chatbot data pagination params: %s", exc)
         return {"error": str(exc)}, HTTPStatus.BAD_REQUEST
 
 
@@ -87,8 +100,10 @@ def list_records():
 def get_record(record_id: str):
     try:
         dto = service.get_record(record_id)
+        logger.info("Fetched chatbot data record id=%s", record_id)
         return jsonify(_serialize(dto))
     except NotFoundError:
+        logger.warning("Chatbot data record id=%s not found", record_id)
         return {"error": "Chatbot data not found"}, HTTPStatus.NOT_FOUND
 
 
@@ -97,8 +112,10 @@ def create_record():
     payload = request.get_json(silent=True) or {}
     try:
         dto = service.create_record(payload)
+        logger.info("Created chatbot data record id=%s", dto.id)
         return jsonify(_serialize(dto)), HTTPStatus.CREATED
     except ValidationError as exc:
+        logger.warning("Invalid chatbot data create payload: %s", exc)
         return {"error": str(exc)}, HTTPStatus.BAD_REQUEST
 
 
@@ -107,10 +124,13 @@ def update_record(record_id: str):
     payload = request.get_json(silent=True) or {}
     try:
         dto = service.update_record(record_id, payload)
+        logger.info("Updated chatbot data record id=%s", record_id)
         return jsonify(_serialize(dto))
     except ValidationError as exc:
+        logger.warning("Invalid chatbot data update payload for id=%s: %s", record_id, exc)
         return {"error": str(exc)}, HTTPStatus.BAD_REQUEST
     except NotFoundError:
+        logger.warning("Chatbot data record id=%s not found for update", record_id)
         return {"error": "Chatbot data not found"}, HTTPStatus.NOT_FOUND
 
 
@@ -118,8 +138,10 @@ def update_record(record_id: str):
 def delete_record(record_id: str):
     try:
         service.delete_record(record_id)
+        logger.info("Deleted chatbot data record id=%s", record_id)
         return {"ok": True}
     except NotFoundError:
+        logger.warning("Chatbot data record id=%s not found for delete", record_id)
         return {"error": "Chatbot data not found"}, HTTPStatus.NOT_FOUND
 
 

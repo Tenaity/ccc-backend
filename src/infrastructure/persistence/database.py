@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+import logging
 from pathlib import Path
 from typing import Iterator
 
@@ -13,6 +13,8 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from src.settings.config import get_database_settings
+
+logger = logging.getLogger(__name__)
 
 Base = declarative_base()
 _engine = None
@@ -75,6 +77,7 @@ def get_engine():
         _engine = create_engine(url, **engine_kwargs)
         _SessionLocal = None
         _active_url = url
+    logger.info("Using database engine with URL: %s", url)
     return _engine
 
 

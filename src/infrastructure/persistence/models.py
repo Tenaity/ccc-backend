@@ -262,26 +262,29 @@ class ChatbotData(Base):
     __tablename__ = "chatbot_data"
 
     id: Mapped[str] = mapped_column(
-        String(36),
+        String(64),
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
     )
-    raw_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    major_section: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    full_section_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    source_table: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    another_price: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    rawText: Mapped[Optional[str]] = mapped_column("rawText", Text, nullable=True)
+    majorSection: Mapped[Optional[str]] = mapped_column("majorSection", String, nullable=True)
+    fullSectionId: Mapped[Optional[str]] = mapped_column("fullSectionId", String, nullable=True)
+    sourceTable: Mapped[Optional[str]] = mapped_column("sourceTable", String, nullable=True)
+    anotherPrice: Mapped[Optional[str]] = mapped_column("anotherPrice", String, nullable=True)
     title: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     site: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    shipment_direction: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    container_status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    container_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    container_size: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    service_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    operation_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    shipmentDirection: Mapped[Optional[str]] = mapped_column("shipmentDirection", String, nullable=True)
+    containerStatus: Mapped[Optional[str]] = mapped_column("containerStatus", String, nullable=True)
+    containerType: Mapped[Optional[str]] = mapped_column("containerType", String, nullable=True)
+    containerSize: Mapped[Optional[str]] = mapped_column("containerSize", String, nullable=True)
+    serviceType: Mapped[Optional[str]] = mapped_column("serviceType", String, nullable=True)
+    operationType: Mapped[Optional[str]] = mapped_column("operationType", String, nullable=True)
     location: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    from_location: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    to_location: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    from_location: Mapped[Optional[str]] = mapped_column("from", String, nullable=True)
+    to_location: Mapped[Optional[str]] = mapped_column("to", String, nullable=True)
+
     unit: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     price_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -289,14 +292,15 @@ class ChatbotData(Base):
     calculation_formula: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     scope_and_conditions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    point_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     keywords: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    embedding_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    embeddingText: Mapped[Optional[str]] = mapped_column("embeddingText", Text, nullable=True)
+    year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     process: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     intent: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     cauhoi: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     maily: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-
 class ShiftPlanDefaults(Base):
     __tablename__ = "shift_plan_defaults"
     __table_args__ = (
@@ -445,6 +449,72 @@ def init_db():
                 conn.exec_driver_sql(
                     "ALTER TABLE staff ADD COLUMN department_id INTEGER NULL"
                 )
+
+    # --- Migration: align chatbot_data columns with application schema ---
+    if "chatbot_data" in tables:
+        rename_map = {
+            "from_location": "from",
+            "fromLocation": "from",
+            "to_location": "to",
+            "toLocation": "to",
+            "priceType": "price_type",
+            "basePriceRef": "base_price_ref",
+            "calculationFormula": "calculation_formula",
+            "scopeAndConditions": "scope_and_conditions",
+        }
+        chatbot_cols = {col["name"] for col in insp.get_columns("chatbot_data")}
+        for old, new in rename_map.items():
+            if old in chatbot_cols and new not in chatbot_cols:
+                with engine.begin() as conn:
+                    conn.exec_driver_sql(
+                        f'ALTER TABLE chatbot_data RENAME COLUMN "{old}" TO "{new}"'
+                    )
+                insp = inspect(engine)
+                chatbot_cols = {col["name"] for col in insp.get_columns("chatbot_data")}
+
+        id_col = next((col for col in insp.get_columns("chatbot_data") if col["name"] == "id"), None)
+        if id_col is not None:
+            col_type = id_col.get("type")
+            length = getattr(col_type, "length", None)
+            try:
+                length_val = int(length) if length is not None else None
+            except TypeError:
+                length_val = None
+            if length_val is not None and length_val < 64:
+                with engine.begin() as conn:
+                    conn.exec_driver_sql("ALTER TABLE chatbot_data ALTER COLUMN id TYPE VARCHAR(64)")
+                insp = inspect(engine)
+
+        chatbot_cols = {col["name"] for col in insp.get_columns("chatbot_data")}
+        type_updates = {
+            "calculation_formula": "TEXT",
+            "calculationFormula": "TEXT",
+            "scope_and_conditions": "TEXT",
+            "scopeAndConditions": "TEXT",
+        }
+        for col_name, target_type in type_updates.items():
+            col_info = next((col for col in insp.get_columns("chatbot_data") if col["name"] == col_name), None)
+            if col_info is not None:
+                col_type = col_info.get("type")
+                length = getattr(col_type, "length", None)
+                if length is not None:
+                    with engine.begin() as conn:
+                        conn.exec_driver_sql(
+                            f'ALTER TABLE chatbot_data ALTER COLUMN "{col_name}" TYPE {target_type} USING "{col_name}"::{target_type}'
+                        )
+                    insp = inspect(engine)
+
+        chatbot_cols = {col["name"] for col in insp.get_columns("chatbot_data")}
+        additions = {
+            "point_note": "ALTER TABLE chatbot_data ADD COLUMN point_note TEXT NULL",
+            "year": "ALTER TABLE chatbot_data ADD COLUMN year INTEGER NULL",
+        }
+        for name, statement in additions.items():
+            if name not in chatbot_cols:
+                with engine.begin() as conn:
+                    conn.exec_driver_sql(statement)
+                insp = inspect(engine)
+                chatbot_cols = {col["name"] for col in insp.get_columns("chatbot_data")}
 
 __all__ = [
     'Base',
