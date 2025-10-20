@@ -1,11 +1,57 @@
+# Virtual environments
 .venv
-__pycache__/
-.pytest_cache/
-.coverage
-dist/
-build/
-instance/*.sqlite
-instance/*.db
-.env
 .venv311
 .venv_backup
+venv/
+ENV/
+env/
+
+# Python cache & compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# Database
+instance/*.sqlite
+instance/*.db
+*.db
+*.sqlite3
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Project specific
+*.backup
+.backup/
+temp/
+tmp/
