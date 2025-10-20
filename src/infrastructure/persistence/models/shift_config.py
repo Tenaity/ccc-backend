@@ -1,6 +1,6 @@
 """ShiftConfig model for custom shift configuration per department."""
 
-from sqlalchemy import Boolean, ForeignKey, Integer, JSON, String
+from sqlalchemy import Boolean, ForeignKey, Integer, JSON, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.infrastructure.persistence.models.base import Base
@@ -34,7 +34,7 @@ class ShiftConfig(Base):
     department: Mapped["Department"] = relationship(back_populates="shifts")
 
     __table_args__ = (
-        ("uq_shift_config_dept_code", {"unique": True, "columns": ["department_id", "code"]}),
+        UniqueConstraint("department_id", "code", name="uq_shift_config_dept_code"),
     )
 
     __all__ = ["ShiftConfig"]
