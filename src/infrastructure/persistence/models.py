@@ -282,25 +282,21 @@ class ChatbotData(Base):
     operationType: Mapped[Optional[str]] = mapped_column("operationType", String, nullable=True)
     location: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
-    from_location: Mapped[Optional[str]] = mapped_column("from", String, nullable=True)
-    to_location: Mapped[Optional[str]] = mapped_column("to", String, nullable=True)
+    from_: Mapped[Optional[str]] = mapped_column("from", String, nullable=True)
+    to: Mapped[Optional[str]] = mapped_column("to", String, nullable=True)
 
     unit: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    price_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    base_price_ref: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    calculation_formula: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    priceType: Mapped[Optional[str]] = mapped_column("priceType", String, nullable=True)
+    basePriceRef: Mapped[Optional[str]] = mapped_column("basePriceRef", String, nullable=True)
+    calculationFormula: Mapped[Optional[str]] = mapped_column("calculationFormula", Text, nullable=True)
     context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    scope_and_conditions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    point_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    scopeAndConditions: Mapped[Optional[str]] = mapped_column("scopeAndConditions", Text, nullable=True)
+    pointNote: Mapped[Optional[str]] = mapped_column("pointNote", Text, nullable=True)
     keywords: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     embeddingText: Mapped[Optional[str]] = mapped_column("embeddingText", Text, nullable=True)
     year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    process: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    intent: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    cauhoi: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    maily: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 class ShiftPlanDefaults(Base):
     __tablename__ = "shift_plan_defaults"
     __table_args__ = (
@@ -453,14 +449,27 @@ def init_db():
     # --- Migration: align chatbot_data columns with application schema ---
     if "chatbot_data" in tables:
         rename_map = {
+            "raw_text": "rawText",
+            "major_section": "majorSection",
+            "full_section_id": "fullSectionId",
+            "source_table": "sourceTable",
+            "another_price": "anotherPrice",
+            "shipment_direction": "shipmentDirection",
+            "container_status": "containerStatus",
+            "container_type": "containerType",
+            "container_size": "containerSize",
+            "service_type": "serviceType",
+            "operation_type": "operationType",
             "from_location": "from",
             "fromLocation": "from",
             "to_location": "to",
             "toLocation": "to",
-            "priceType": "price_type",
-            "basePriceRef": "base_price_ref",
-            "calculationFormula": "calculation_formula",
-            "scopeAndConditions": "scope_and_conditions",
+            "price_type": "priceType",
+            "base_price_ref": "basePriceRef",
+            "calculation_formula": "calculationFormula",
+            "scope_and_conditions": "scopeAndConditions",
+            "point_note": "pointNote",
+            "embedding_text": "embeddingText",
         }
         chatbot_cols = {col["name"] for col in insp.get_columns("chatbot_data")}
         for old, new in rename_map.items():
@@ -506,13 +515,23 @@ def init_db():
 
         chatbot_cols = {col["name"] for col in insp.get_columns("chatbot_data")}
         additions = {
-            "point_note": "ALTER TABLE chatbot_data ADD COLUMN point_note TEXT NULL",
+            "pointNote": 'ALTER TABLE chatbot_data ADD COLUMN "pointNote" TEXT NULL',
             "year": "ALTER TABLE chatbot_data ADD COLUMN year INTEGER NULL",
         }
         for name, statement in additions.items():
             if name not in chatbot_cols:
                 with engine.begin() as conn:
                     conn.exec_driver_sql(statement)
+                insp = inspect(engine)
+                chatbot_cols = {col["name"] for col in insp.get_columns("chatbot_data")}
+
+        # Drop legacy columns that are no longer part of the schema.
+        drop_columns = ("process", "intent", "cauhoi", "maily")
+        chatbot_cols = {col["name"] for col in insp.get_columns("chatbot_data")}
+        for name in drop_columns:
+            if name in chatbot_cols:
+                with engine.begin() as conn:
+                    conn.exec_driver_sql(f'ALTER TABLE chatbot_data DROP COLUMN "{name}"')
                 insp = inspect(engine)
                 chatbot_cols = {col["name"] for col in insp.get_columns("chatbot_data")}
 
